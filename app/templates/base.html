@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="csrf-token" content="{{ csrf_token }}" />
+    <meta name="description" content="{{ cfg.subtitle | default(cfg.name) | striptags }}" />
+    <title>{% block title %}{{ cfg.name }}{% endblock %}</title>
+    <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
+    <script>
+      /* 首帧之前定好主题，避免刷新时出现白闪 / 黑闪 */
+      (function () {
+        var root = document.documentElement;
+        var preference = {{ cfg.default_theme | tojson }};
+        root.dataset.themeDefault = preference;
+        var stored = null;
+        try {
+          stored = localStorage.getItem('ft-theme');
+        } catch (e) {
+          stored = null;
+        }
+        if (!stored) {
+          if (preference === 'dark') stored = 'dark';
+          else if (preference === 'light') stored = 'light';
+          else
+            stored = window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+        }
+        root.dataset.theme = stored === 'dark' ? 'dark' : 'light';
+      })();
+    </script>
+    <link rel="stylesheet" href="/static/css/style.css?v=3" />
+    {% block head %}{% endblock %}
+  </head>
+
+  <body>
+    <header class="topbar">
+      <div class="container">
+        <a class="brand" href="/">
+          <span class="brand-mark">{{ icon('upload', 15) }}</span>
+          <span class="truncate">{{ cfg.name }}</span>
+        </a>
+
+        <nav class="nav" aria-label="主导航">
+          <a class="nav-link {% if request.url.path == '/' %}active{% endif %}" href="/">首页</a>
+
+          {% if current_user %}
+            <a
+              class="nav-link {% if request.url.path.startswith('/dashboard') %}active{% endif %}"
+              href="/dashboard"
+              >我的文件</a
+            >
+
+            <div class="dropdown" data-dropdown>
+              <button
+                type="button"
+                class="icon-btn"
+                data-dropdown-trigger
+                aria-haspopup="menu"
+                aria-label="账号菜单"
+              >
+                <span class="avatar">{{ current_user.username[:1] }}</span>
+              </button>
+              <div class="dropdown-menu" role="menu">
+                <div style="padding: 8px 11px 6px">
+                  <div class="truncate" style="font-weight: 600">{{ current_user.username }}</div>
+                  <div class="tiny muted truncate">{{ current_user.email }}</div>
+                </div>
+                <div class="dropdown-sep"></div>
+                <a class="dropdown-item" href="/dashboard" role="menuitem">
+                  {{ icon('file', 16) }} 我的文件
+                </a>
+                <a class="dropdown-item" href="/me/settings" role="menuitem">
+                  {{ icon('user', 16) }} 个人设置
+                </a>
+                {% if current_user.is_admin %}
+                  <a class="dropdown-item" href="/admin" role="menuitem">
+                    {{ icon('shield', 16) }} 管理后台
+                  </a>
+                {% endif %}
+                <div class="dropdown-sep"></div>
+                <button type="button" class="dropdown-item danger" data-logout role="menuitem">
+                  {{ icon('logout', 16) }} 退出登录
+                </button>
+              </div>
+            </div>
+          {% else %}
+            <a
+              class="nav-link {% if request.url.path == '/login' %}active{% endif %}"
+              href="/login"
+              >登录</a
+            >
+            {% if cfg.registration_enabled %}
+              <a class="btn btn-primary btn-sm" href="/register">注册</a>
+            {% endif %}
+          {% endif %}
+
+          <button
+            type="button"
+            class="icon-btn theme-toggle"
+            data-theme-toggle
+            aria-label="切换日间/夜间模式"
+            title="切换日间/夜间模式"
+          >
+            <span class="icon-moon">{{ icon('moon', 18) }}</span>
+            <span class="icon-sun">{{ icon('sun', 18) }}</span>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="container">
+        {% if cfg.announcement %}
+          <div class="announcement">
+            {{ icon('alert', 17) }}
+            <div>{{ cfg.announcement | striptags | e }}</div>
+          </div>
+        {% endif %}
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <div>
+          {% if cfg.footer %}{{ cfg.footer | striptags | e }}{% else %}{{ cfg.name }}{% endif %}
+        </div>
+        <div>文件最长保留 {{ cfg.max_expire_days }} 天，到期自动删除 · © {{ now_year(cfg.timezone) }}</div>
+      </div>
+    </footer>
+
+    <div id="toast-root" class="toast-root" aria-live="polite"></div>
+    <script src="/static/js/app.js?v=1"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

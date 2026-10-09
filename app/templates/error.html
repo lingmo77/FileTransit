@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}{{ code }} · {{ cfg.name }}{% endblock %}
+
+{% block content %}
+  <div class="auth-wrap">
+    <div class="auth-card" style="text-align: center">
+      <div
+        class="mark"
+        style="background: var(--surface-2); color: var(--muted); font-weight: 700; font-size: 18px"
+      >
+        {{ code }}
+      </div>
+      <h1 style="font-size: 1.2rem">
+        {% if code == 404 %}找不到页面
+        {% elif code == 403 %}没有访问权限
+        {% elif code == 410 %}文件已过期
+        {% elif code == 401 %}需要登录
+        {% else %}出现了一点问题{% endif %}
+      </h1>
+      <p class="small muted">{{ message }}</p>
+
+      <div class="row" style="justify-content: center; margin-top: 20px">
+        <a class="btn btn-primary" href="/">返回首页</a>
+        {% if not current_user %}
+          <a class="btn" href="/login">去登录</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

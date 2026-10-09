@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <div class="admin-layout">
+    <nav class="admin-nav" aria-label="后台导航">
+      <a href="/admin" class="{% if section == 'dashboard' %}active{% endif %}">
+        {{ icon('chart', 17) }} 仪表盘
+      </a>
+      <a href="/admin/users" class="{% if section == 'users' %}active{% endif %}">
+        {{ icon('users', 17) }} 用户管理
+      </a>
+      <a href="/admin/files" class="{% if section == 'files' %}active{% endif %}">
+        {{ icon('file', 17) }} 文件管理
+      </a>
+      <a href="/admin/logs" class="{% if section == 'logs' %}active{% endif %}">
+        {{ icon('list', 17) }} 操作日志
+      </a>
+      <a href="/admin/settings" class="{% if section == 'settings' %}active{% endif %}">
+        {{ icon('settings', 17) }} 站点设置
+      </a>
+      <a href="/admin/email" class="{% if section == 'email' %}active{% endif %}">
+        {{ icon('mail', 17) }} 邮件服务
+      </a>
+      <div class="dropdown-sep"></div>
+      <a href="/">{{ icon('external', 17) }} 返回站点</a>
+    </nav>
+
+    <div class="grow">{% block admin_content %}{% endblock %}</div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/js/admin.js?v=2"></script>
+  {% block admin_scripts %}{% endblock %}
+{% endblock %}

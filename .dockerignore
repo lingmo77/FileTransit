@@ -1,0 +1,23 @@
+# 构建镜像时不需要的东西——尤其是 data/ 里的真实用户文件
+.git/
+.gitignore
+.github/
+
+data/
+*.db
+*.db-wal
+*.db-shm
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+
+.env
+.env.example
+docker-compose.yml
+Dockerfile
+.dockerignore
+*.md

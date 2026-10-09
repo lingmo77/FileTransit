@@ -1,0 +1,70 @@
+{% macro file_card(item, manage=False) %}
+  {% set cat = item.mime_type | file_category(item.original_name) %}
+  {% set link = '/download/' ~ item.public_id ~ '/' ~ (item.original_name | urlencode) %}
+  <article class="file-card">
+    <div class="file-top">
+      <div class="file-icon cat-{{ cat }}" title="{{ CATEGORY_LABELS.get(cat, '文件') }}">
+        {{ item.original_name | ext or 'FILE' }}
+      </div>
+      <div class="grow">
+        <div class="file-name" title="{{ item.original_name }}">
+          <a href="/f/{{ item.public_id }}">{{ item.original_name }}</a>
+        </div>
+        <div class="file-meta">
+          <span>{{ item.size | human_size }}</span>
+          <span>{{ item.created_at | fmt_dt(cfg.timezone) }}</span>
+          {% if manage %}
+            <span>{{ item.download_count }} 次下载</span>
+          {% elif item.owner %}
+            <span>{{ item.owner.username }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="row file-badges">
+      {% if item.is_expired %}
+        <span class="badge badge-danger">已过期</span>
+      {% elif item.expires_at is none %}
+        <span class="badge badge-success">长期有效</span>
+      {% elif item.expires_at | is_expiring_soon %}
+        <span class="badge badge-warning">即将过期</span>
+      {% else %}
+        <span class="badge">{{ item.expires_at | remaining(cfg.timezone) }}</span>
+      {% endif %}
+      {% if not item.is_public %}
+        <span class="badge badge-warning">仅自己可见</span>
+      {% endif %}
+    </div>
+
+    <div class="file-actions">
+      <a class="btn btn-primary btn-sm" href="{{ link }}" rel="nofollow">
+        {{ icon('download', 15) }} 下载
+      </a>
+      <button type="button" class="btn btn-sm" data-copy="{{ link }}" title="复制直链，可用于 IDM / 迅雷">
+        {{ icon('copy', 15) }} 链接
+      </button>
+      {% if manage %}
+        <button
+          type="button"
+          class="btn btn-sm btn-ghost"
+          data-edit-file="{{ item.id }}"
+          data-expires="{{ item.expires_at | fmt_iso }}"
+          data-public="{{ 'true' if item.is_public else 'false' }}"
+          title="修改有效期与可见性"
+        >
+          {{ icon('settings', 15) }}
+        </button>
+        <button
+          type="button"
+          class="btn btn-sm btn-ghost btn-danger"
+          data-delete-file="{{ item.id }}"
+          data-name="{{ item.original_name }}"
+          title="删除"
+        >
+          {{ icon('trash', 15) }}
+        </button>
+      {% endif %}
+    </div>
+  </article>
+{% endmacro %}

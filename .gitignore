@@ -1,0 +1,28 @@
+# 运行时数据：SQLite 数据库与用户上传的文件，绝对不能进仓库
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# 环境配置
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 部署产物：由打包步骤生成，体积大（离线包含 68MB 镜像），不进仓库
+/dist/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

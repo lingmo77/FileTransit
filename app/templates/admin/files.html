@@ -1,0 +1,131 @@
+{% extends "admin/base_admin.html" %}
+{% from "partials/pagination.html" import pager %}
+
+{% block title %}文件管理 · {{ cfg.name }}{% endblock %}
+
+{% block admin_content %}
+  <div class="page-head">
+    <div>
+      <h1>文件管理</h1>
+      <p class="subtitle">
+        共 {{ result.total }} 个{% if expired %}已过期{% else %}在架{% endif %}文件
+      </p>
+    </div>
+  </div>
+
+  <form class="toolbar" method="get" action="/admin/files">
+    <input
+      type="search"
+      name="q"
+      value="{{ q }}"
+      placeholder="搜索文件名"
+      style="width: 220px"
+      autocomplete="off"
+    />
+    <input
+      type="number"
+      name="user_id"
+      value="{{ user_id or '' }}"
+      placeholder="用户 ID"
+      style="width: 120px"
+      min="1"
+    />
+    <label class="checkbox field-inline">
+      <input type="checkbox" name="expired" value="1" {% if expired %}checked{% endif %} />
+      <span class="small">只看已过期</span>
+    </label>
+    <button class="btn btn-sm" type="submit">{{ icon('search', 15) }} 筛选</button>
+    {% if q or user_id or expired %}
+      <a class="btn btn-sm btn-ghost" href="/admin/files">清除</a>
+    {% endif %}
+  </form>
+
+  <section class="card">
+    {% if result.items %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>文件名</th>
+              <th>所有者</th>
+              <th>大小</th>
+              <th>上传时间</th>
+              <th>到期时间</th>
+              <th class="col-tight">下载</th>
+              <th class="col-tight">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in result.items %}
+              <tr>
+                <td style="max-width: 320px">
+                  <a
+                    class="truncate"
+                    href="/f/{{ item.public_id }}"
+                    style="color: var(--text)"
+                    title="{{ item.original_name }}"
+                  >
+                    {{ item.original_name }}
+                  </a>
+                  <div class="tiny muted">
+                    {{ icon('download', 12) }}
+                    <a class="muted" href="/d/{{ item.public_id }}">直链</a>
+                    {% if not item.is_public %}
+                      <span class="badge badge-warning">私有</span>
+                    {% endif %}
+                  </div>
+                </td>
+                <td class="nowrap small">
+                  {{ item.owner.username if item.owner else '已删除用户' }}
+                  {% if item.owner %}<div class="tiny muted">#{{ item.user_id }}</div>{% endif %}
+                </td>
+                <td class="nowrap small">{{ item.size | human_size }}</td>
+                <td class="nowrap tiny muted">{{ item.created_at | fmt_dt(cfg.timezone) }}</td>
+                <td class="nowrap tiny">
+                  {% if item.is_expired %}
+                    <span class="badge badge-danger">已过期</span>
+                  {% elif item.expires_at is none %}
+                    <span class="badge badge-success">长期有效</span>
+                  {% else %}
+                    <span class="muted">{{ item.expires_at | fmt_dt(cfg.timezone) }}</span>
+                    <div class="muted">剩余 {{ item.expires_at | remaining(cfg.timezone) }}</div>
+                  {% endif %}
+                </td>
+                <td class="nowrap small">{{ item.download_count }}</td>
+                <td class="actions">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost"
+                    data-action="edit-file"
+                    data-id="{{ item.id }}"
+                    data-name="{{ item.original_name }}"
+                    data-public="{{ 'true' if item.is_public else 'false' }}"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost btn-danger"
+                    data-action="delete-file"
+                    data-id="{{ item.id }}"
+                    data-name="{{ item.original_name }}"
+                  >
+                    删除
+                  </button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-foot">
+        {{ pager(result, '/admin/files', {'q': q, 'user_id': user_id, 'expired': '1' if expired else ''}) }}
+      </div>
+    {% else %}
+      <div class="empty">
+        <div class="icon">{{ icon('file', 26) }}</div>
+        <p>没有符合条件的文件</p>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

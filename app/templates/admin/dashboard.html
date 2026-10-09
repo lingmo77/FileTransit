@@ -1,0 +1,161 @@
+{% extends "admin/base_admin.html" %}
+
+{% block title %}仪表盘 · {{ cfg.name }}{% endblock %}
+
+{% block admin_content %}
+  <div class="page-head">
+    <div>
+      <h1>仪表盘</h1>
+      <p class="subtitle">站点整体运行情况</p>
+    </div>
+    <div class="row">
+      <button type="button" class="btn" data-action="maintenance">
+        {{ icon('refresh', 16) }} 立即执行维护
+      </button>
+    </div>
+  </div>
+
+  <div class="stat-grid" style="margin-bottom: 14px">
+    <div class="stat">
+      <div class="label">注册用户</div>
+      <div class="value">{{ users_total }}</div>
+      <div class="hint">启用 {{ users_active }} · 待验证 {{ users_pending }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">在架文件</div>
+      <div class="value">{{ files_active }}</div>
+      <div class="hint">待清理 {{ files_expired }} 个</div>
+    </div>
+    <div class="stat">
+      <div class="label">占用空间</div>
+      <div class="value">{{ files_bytes | human_size }}</div>
+      <div class="hint">磁盘剩余 {{ disk_free | human_size }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">累计下载</div>
+      <div class="value">{{ downloads_total }}</div>
+      <div class="hint">今日 {{ downloads_today }} 次</div>
+    </div>
+  </div>
+
+  <div class="detail-grid" style="margin-bottom: 18px">
+    <!-- 趋势 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>近 7 日趋势</h2>
+        <div class="row" style="gap: 14px">
+          <span class="tiny muted">{{ icon('upload', 13) }} 上传</span>
+          <span class="tiny muted">{{ icon('download', 13) }} 下载</span>
+        </div>
+      </div>
+      <div class="card-body">
+        {% set peak = trend | map(attribute='uploads') | max %}
+        <div class="chart">
+          {% for day in trend %}
+            <div class="bar-group" title="{{ day.date }}：上传 {{ day.uploads }} · 下载 {{ day.downloads }}">
+              <div class="bars">
+                <div class="bar" style="height: {{ day.upload_pct }}%"></div>
+                <div class="bar dl" style="height: {{ day.download_pct }}%"></div>
+              </div>
+              <div class="bar-label">{{ day.date[5:] }}</div>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="spread" style="margin-top: 14px">
+          <span class="small muted">今日上传 {{ uploads_today }} 个文件</span>
+          <span class="small muted">峰值 {{ peak }} 次/日</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 磁盘与服务器 -->
+    <aside class="stack">
+      <section class="card">
+        <div class="card-head"><h2>磁盘占用</h2></div>
+        <div class="card-body">
+          <div class="spread" style="margin-bottom: 8px">
+            <span class="small">已用 {{ disk_used | human_size }}</span>
+            <span class="small muted">共 {{ disk_total | human_size }}</span>
+          </div>
+          <div class="meter {% if disk_used_pct > 90 %}danger{% elif disk_used_pct > 75 %}warn{% endif %}">
+            <i style="width: {{ [disk_used_pct, 100] | min }}%"></i>
+          </div>
+          <p class="tiny muted" style="margin: 10px 0 0">
+            文件中转占用 {{ files_bytes | human_size }}，磁盘使用率 {{ disk_used_pct }}%
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>容量 Top 用户</h2></div>
+        <div class="card-body" style="padding: 0">
+          {% if top_users %}
+            <ul class="list-plain">
+              {% for user in top_users %}
+                <li style="padding: 10px 18px; border-bottom: 1px solid var(--border)">
+                  <div class="spread">
+                    <span class="small truncate">{{ user.username }}</span>
+                    <span class="tiny muted nowrap">
+                      {{ user.files }} 个 · {{ user.bytes | human_size }}
+                    </span>
+                  </div>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="small muted" style="padding: 18px; margin: 0">暂无数据</p>
+          {% endif %}
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- 最近上传 -->
+  <section class="card">
+    <div class="card-head">
+      <h2>最近上传</h2>
+      <a class="small" href="/admin/files">查看全部 →</a>
+    </div>
+    {% if recent_files %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>文件名</th>
+              <th>大小</th>
+              <th>上传者</th>
+              <th>剩余有效期</th>
+              <th class="col-tight">下载</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in recent_files %}
+              <tr>
+                <td>
+                  <a class="truncate" href="/f/{{ item.public_id }}" style="color: var(--text)">
+                    {{ item.original_name }}
+                  </a>
+                  {% if not item.is_public %}<span class="badge badge-warning">私有</span>{% endif %}
+                </td>
+                <td class="nowrap">{{ item.size | human_size }}</td>
+                <td class="nowrap">{{ item.owner.username if item.owner else '-' }}</td>
+                <td class="nowrap">
+                  {% if item.is_expired %}
+                    <span class="badge badge-danger">已过期</span>
+                  {% elif item.expires_at is none %}
+                    <span class="badge badge-success">长期有效</span>
+                  {% else %}
+                    {{ item.expires_at | remaining(cfg.timezone) }}
+                  {% endif %}
+                </td>
+                <td class="nowrap">{{ item.download_count }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty"><p>还没有文件</p></div>
+    {% endif %}
+  </section>
+{% endblock %}

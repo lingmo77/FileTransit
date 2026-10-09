@@ -1,0 +1,39 @@
+{% macro pager(page_obj, base_path, params) %}
+  {% if page_obj.total_pages > 1 %}
+    <nav class="pagination" aria-label="分页导航">
+      {% if page_obj.has_prev %}
+        <a href="{{ page_url(base_path, params, page_obj.prev_page) }}" rel="prev" aria-label="上一页">
+          {{ icon('chevron-left', 16) }}
+        </a>
+      {% else %}
+        <span class="disabled" aria-hidden="true">{{ icon('chevron-left', 16) }}</span>
+      {% endif %}
+
+      {% for number in page_obj.page_numbers() %}
+        {% if number is none %}
+          <span class="ellipsis">…</span>
+        {% elif number == page_obj.page %}
+          <span class="current" aria-current="page">{{ number }}</span>
+        {% else %}
+          <a href="{{ page_url(base_path, params, number) }}">{{ number }}</a>
+        {% endif %}
+      {% endfor %}
+
+      {% if page_obj.has_next %}
+        <a href="{{ page_url(base_path, params, page_obj.next_page) }}" rel="next" aria-label="下一页">
+          {{ icon('chevron-right', 16) }}
+        </a>
+      {% else %}
+        <span class="disabled" aria-hidden="true">{{ icon('chevron-right', 16) }}</span>
+      {% endif %}
+    </nav>
+  {% endif %}
+{% endmacro %}
+
+{% macro summary(page_obj) %}
+  {% if page_obj.total %}
+    <p class="tiny muted" style="text-align: center; margin-top: 10px">
+      第 {{ page_obj.first_index }}–{{ page_obj.last_index }} 条，共 {{ page_obj.total }} 条
+    </p>
+  {% endif %}
+{% endmacro %}

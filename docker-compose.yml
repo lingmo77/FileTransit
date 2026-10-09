@@ -1,0 +1,46 @@
+# 最简部署：
+#   cp .env.example .env   # 改掉 FT_SECRET_KEY
+#   docker compose up -d --build
+#
+# 数据全部落在命名卷 ft-data 里（SQLite + 上传的文件），
+# 容器重建不会丢数据；要备份直接备份这个卷即可。
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: file-transfer:1.0
+    container_name: file-transfer
+    restart: unless-stopped
+    env_file:
+      # .env 不存在时也能起来（此时用镜像里的默认值）
+      - path: .env
+        required: false
+    environment:
+      FT_DATA_DIR: /app/data
+      FT_WORKERS: ${FT_WORKERS:-4}
+    ports:
+      - "${FT_PORT:-8000}:8000"
+    volumes:
+      - ft-data:/app/data
+    # 给正在传输的上传/下载留出收尾时间，避免重启时把大文件传输掐断
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ft-data:

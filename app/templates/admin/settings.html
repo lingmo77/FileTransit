@@ -1,0 +1,237 @@
+{% extends "admin/base_admin.html" %}
+
+{% block title %}站点设置 · {{ cfg.name }}{% endblock %}
+
+{% block admin_content %}
+  {% set timezones = [
+    'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Tokyo', 'Asia/Seoul',
+    'Asia/Singapore', 'Asia/Bangkok', 'Asia/Kolkata', 'Asia/Dubai',
+    'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
+    'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'America/Sao_Paulo',
+    'Australia/Sydney', 'UTC'
+  ] %}
+
+  <form data-form="settings">
+    <div class="page-head">
+      <div>
+        <h1>站点设置</h1>
+        <p class="subtitle">改动会立即生效，无需重启服务</p>
+      </div>
+      <button type="submit" class="btn btn-primary">{{ icon('save', 16) }} 保存设置</button>
+    </div>
+
+    <!-- 站点信息 -->
+    <section class="card" style="margin-bottom: 18px">
+      <div class="card-head"><h2>{{ icon('globe', 17) }} 站点信息</h2></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="field">
+            <label for="site-name">网站名称</label>
+            <input type="text" id="site-name" name="site.name" value="{{ values.get('site.name', '') }}" maxlength="60" />
+          </div>
+          <div class="field">
+            <label for="site-subtitle">副标题 / 站点描述</label>
+            <input
+              type="text"
+              id="site-subtitle"
+              name="site.subtitle"
+              value="{{ values.get('site.subtitle', '') }}"
+              maxlength="120"
+            />
+          </div>
+          <div class="field">
+            <label for="site-theme">默认主题</label>
+            {% set theme = values.get('site.default_theme', 'system') %}
+            <select id="site-theme" name="site.default_theme">
+              <option value="system" {% if theme == 'system' %}selected{% endif %}>跟随系统</option>
+              <option value="light" {% if theme == 'light' %}selected{% endif %}>日间模式</option>
+              <option value="dark" {% if theme == 'dark' %}selected{% endif %}>夜间模式</option>
+            </select>
+            <span class="help">游客首次访问时使用的主题</span>
+          </div>
+          <div class="field">
+            <label for="site-tz">时区</label>
+            {% set tz = values.get('site.timezone', 'Asia/Shanghai') %}
+            <select id="site-tz" name="site.timezone">
+              {% if tz not in timezones %}
+                <option value="{{ tz }}" selected>{{ tz }}（当前）</option>
+              {% endif %}
+              {% for zone in timezones %}
+                <option value="{{ zone }}" {% if tz == zone %}selected{% endif %}>{{ zone }}</option>
+              {% endfor %}
+            </select>
+            <span class="help">影响页面上所有时间的显示</span>
+          </div>
+          <div class="field">
+            <label for="site-base-url">站点根地址</label>
+            <input
+              type="url"
+              id="site-base-url"
+              name="site.base_url"
+              value="{{ values.get('site.base_url', '') }}"
+              placeholder="https://pan.example.com"
+            />
+            <span class="help">用于拼接邮件里的验证链接；留空则按访问地址自动推断</span>
+          </div>
+          <div class="field">
+            <label for="site-footer">页脚文字</label>
+            <input type="text" id="site-footer" name="site.footer" value="{{ values.get('site.footer', '') }}" maxlength="200" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="site-announcement">全站公告</label>
+          <textarea
+            id="site-announcement"
+            name="site.announcement"
+            maxlength="500"
+            placeholder="留空则不显示。支持纯文本。"
+          >{{ values.get('site.announcement', '') }}</textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- 功能开关 -->
+    <section class="card" style="margin-bottom: 18px">
+      <div class="card-head"><h2>{{ icon('shield', 17) }} 功能开关</h2></div>
+      <div class="card-body">
+        <label class="checkbox" style="margin-bottom: 14px">
+          <input
+            type="checkbox"
+            name="registration.enabled"
+            {% if values.get('registration.enabled', True) %}checked{% endif %}
+          />
+          <span>允许新用户注册<span class="tiny muted" style="display:block">关闭后 /register 页面将提示「本站已关闭注册」</span></span>
+        </label>
+
+        <label class="checkbox" style="margin-bottom: 14px">
+          <input
+            type="checkbox"
+            name="registration.require_email_verification"
+            {% if values.get('registration.require_email_verification', True) %}checked{% endif %}
+          />
+          <span>注册需要邮箱验证<span class="tiny muted" style="display:block">需要先配置好邮件服务器</span></span>
+        </label>
+
+        <label class="checkbox" style="margin-bottom: 14px">
+          <input
+            type="checkbox"
+            name="site.allow_guest_download"
+            {% if values.get('site.allow_guest_download', True) %}checked{% endif %}
+          />
+          <span>允许未登录用户下载<span class="tiny muted" style="display:block">关闭后下载链接需要登录</span></span>
+        </label>
+
+        <label class="checkbox">
+          <input
+            type="checkbox"
+            name="site.log_anonymous_download"
+            {% if values.get('site.log_anonymous_download', True) %}checked{% endif %}
+          />
+          <span>记录匿名下载日志<span class="tiny muted" style="display:block">关闭可显著减少日志体积</span></span>
+        </label>
+      </div>
+    </section>
+
+    <!-- 配额 -->
+    <section class="card" style="margin-bottom: 18px">
+      <div class="card-head">
+        <h2>{{ icon('database', 17) }} 配额与有效期</h2>
+        <span class="tiny muted">用户单独设置的限额优先于这里的默认值</span>
+      </div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="field">
+            <label for="quota-files">默认同时分享文件数</label>
+            <input
+              type="number"
+              id="quota-files"
+              name="quota.default_max_files"
+              data-type="int"
+              min="-1"
+              value="{{ values.get('quota.default_max_files', 10) }}"
+            />
+            <span class="help">填 -1 表示不限制</span>
+          </div>
+          <div class="field">
+            <label for="quota-bytes">默认总空间（GB）</label>
+            <input
+              type="number"
+              id="quota-bytes"
+              name="quota.default_max_bytes"
+              data-transform="gb"
+              step="0.5"
+              min="-1"
+              value="{{ ((values.get('quota.default_max_bytes', 0) | int) / 1073741824) | round(2) }}"
+            />
+            <span class="help">填 -1 表示不限制</span>
+          </div>
+          <div class="field">
+            <label for="quota-expire">最长保留天数</label>
+            <input
+              type="number"
+              id="quota-expire"
+              name="quota.max_expire_days"
+              data-type="int"
+              min="1"
+              max="3650"
+              value="{{ values.get('quota.max_expire_days', 30) }}"
+            />
+            <span class="help">用户上传时可选择的最长到期时间</span>
+          </div>
+          <div class="field">
+            <label for="quota-upload">单文件大小上限（MB）</label>
+            <input
+              type="number"
+              id="quota-upload"
+              name="quota.max_upload_mb"
+              data-type="int"
+              min="1"
+              value="{{ values.get('quota.max_upload_mb', 20480) }}"
+            />
+            <span class="help"
+              >上传时实际生效的就是这个值；环境变量 FT_MAX_UPLOAD_MB
+              只在首次建库时作为默认值，之后不再限制</span
+            >
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 日志 -->
+    <section class="card" style="margin-bottom: 18px">
+      <div class="card-head"><h2>{{ icon('list', 17) }} 日志</h2></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="field">
+            <label for="logs-retention">自动保留天数</label>
+            <input
+              type="number"
+              id="logs-retention"
+              name="logs.retention_days"
+              data-type="int"
+              min="0"
+              value="{{ values.get('logs.retention_days', 0) }}"
+            />
+            <span class="help">0 表示不自动清理，由管理员手动清空</span>
+          </div>
+          <div class="field">
+            <label for="logs-max-rows">日志条数上限</label>
+            <input
+              type="number"
+              id="logs-max-rows"
+              name="logs.max_rows"
+              data-type="int"
+              min="1000"
+              value="{{ values.get('logs.max_rows', 500000) }}"
+            />
+            <span class="help">超过后自动删除最旧的记录</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="row" style="justify-content: flex-end">
+      <button type="submit" class="btn btn-primary btn-lg">{{ icon('save', 17) }} 保存设置</button>
+    </div>
+  </form>
+{% endblock %}

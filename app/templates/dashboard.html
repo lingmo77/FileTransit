@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% from "partials/pagination.html" import pager %}
+{% from "partials/file_card.html" import file_card with context %}
+
+{% block title %}我的文件 · {{ cfg.name }}{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>我的文件</h1>
+      <p class="subtitle">文件最长保留 {{ max_expire_days }} 天，到期自动删除并释放配额</p>
+    </div>
+    <div class="row">
+      <button type="button" class="btn btn-sm" id="pick-files">
+        {{ icon('plus', 15) }} 选择文件
+      </button>
+    </div>
+  </div>
+
+  <!-- 配额 -->
+  <div class="stat-grid" style="margin-bottom: 20px">
+    <div class="stat">
+      <div class="label">已用文件数</div>
+      <div class="value">
+        {{ quota.used_files }}
+        <span class="muted" style="font-size: 0.9rem; font-weight: 400">
+          / {{ '∞' if quota.unlimited_files else quota.max_files }}
+        </span>
+      </div>
+      <div class="meter" style="margin-top: 10px">
+        <i
+          style="width: {{ 0 if quota.unlimited_files else [(quota.used_files * 100 / (quota.max_files or 1)), 100] | min }}%"
+        ></i>
+      </div>
+    </div>
+
+    <div class="stat">
+      <div class="label">已用空间</div>
+      <div class="value">{{ quota.used_bytes | human_size }}</div>
+      <div class="meter {% if not quota.unlimited_bytes and quota.used_bytes * 100 / (quota.max_bytes or 1) > 85 %}warn{% endif %}" style="margin-top: 10px">
+        <i
+          style="width: {{ 0 if quota.unlimited_bytes else [(quota.used_bytes * 100 / (quota.max_bytes or 1)), 100] | min }}%"
+        ></i>
+      </div>
+      <div class="hint">
+        上限 {{ '无限制' if quota.unlimited_bytes else (quota.max_bytes | human_size) }}
+      </div>
+    </div>
+
+    <div class="stat">
+      <div class="label">单文件上限</div>
+      <div class="value">{{ max_upload_mb }} <span style="font-size: 0.9rem; font-weight: 400">MB</span></div>
+      <div class="hint">由管理员在后台配置</div>
+    </div>
+  </div>
+
+  <!-- 上传 -->
+  <section class="card card-pad" style="margin-bottom: 22px">
+    <div
+      class="dropzone"
+      id="dropzone"
+      role="button"
+      tabindex="0"
+      data-max-expire-days="{{ max_expire_days }}"
+      data-is-admin="{{ 'true' if current_user and current_user.is_admin else 'false' }}"
+      aria-label="上传文件：点击选择或拖拽文件到此处"
+    >
+      <div class="dz-icon">{{ icon('upload', 22) }}</div>
+      <div class="dz-title">拖拽文件到此处，或点击选择</div>
+      <div class="small muted">支持多选 · 单个文件最大 {{ max_upload_mb }} MB</div>
+    </div>
+    <input type="file" id="file-input" multiple hidden />
+
+    <div class="row" style="margin-top: 16px; gap: 16px">
+      <div class="field" style="margin-bottom: 0; min-width: 170px">
+        <label for="expires_hours">保留时长</label>
+        <select id="expires_hours">
+          {% set options = [(1, '1 小时'), (6, '6 小时'), (24, '1 天'), (72, '3 天'), (168, '7 天'), (336, '14 天'), (720, '30 天')] %}
+          {% for hours, label in options %}
+            {% if hours <= max_expire_days * 24 %}
+              <option value="{{ hours }}" {% if hours == 72 %}selected{% endif %}>{{ label }}</option>
+            {% endif %}
+          {% endfor %}
+          {% if current_user and current_user.is_admin %}
+            <option value="0">长期有效（仅管理员）</option>
+          {% endif %}
+        </select>
+      </div>
+      <label class="checkbox" style="margin-top: 22px">
+        <input type="checkbox" id="is_public" checked />
+        <span>
+          公开分享
+          <span class="tiny muted" style="display: block">取消勾选后仅自己可见，不出现在首页</span>
+        </span>
+      </label>
+    </div>
+
+    <div class="upload-queue" id="upload-queue" hidden></div>
+  </section>
+
+  <!-- 文件列表 -->
+  <div class="spread" style="margin-bottom: 12px">
+    <h2 style="margin: 0; font-size: 1.05rem">
+      我的分享
+      <span class="muted small" style="font-weight: 400">（{{ result.total }}）</span>
+    </h2>
+    <form method="get" action="/dashboard" class="row" style="gap: 8px">
+      <input
+        type="search"
+        name="q"
+        value="{{ q }}"
+        placeholder="搜索我的文件"
+        style="width: 190px"
+        autocomplete="off"
+      />
+      <select name="kind" onchange="this.form.submit()" style="width: 130px">
+        <option value="">全部类型</option>
+        {% for key, label in categories.items() %}
+          <option value="{{ key }}" {% if kind == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-sm" type="submit">{{ icon('search', 15) }}</button>
+    </form>
+  </div>
+
+  {% if result.items %}
+    <div class="file-grid" id="file-grid">
+      {% for item in result.items %}
+        {{ file_card(item, manage=True) }}
+      {% endfor %}
+    </div>
+    {{ pager(result, '/dashboard', {'q': q, 'kind': kind}) }}
+  {% else %}
+    <div class="card empty" id="file-grid-empty">
+      <div class="icon">{{ icon('inbox', 26) }}</div>
+      {% if q or kind %}
+        <p>没有匹配的文件</p>
+        <a class="btn btn-sm" href="/dashboard">清除筛选</a>
+      {% else %}
+        <p>还没有上传过文件</p>
+        <button type="button" class="btn btn-primary btn-sm" id="pick-files-empty">
+          上传第一个文件
+        </button>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/js/upload.js?v=2"></script>
+{% endblock %}

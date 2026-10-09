@@ -1,0 +1,37 @@
+# 运行时依赖（Python 3.12）
+#
+# 直接依赖全部锁定到精确版本；starlette / greenlet 这类会直接影响
+# 下载行为（HTTP Range、FileResponse）与异步数据库的传递依赖也一并锁定，
+# 避免不同环境下的行为漂移。
+
+# ---- Web 框架 ----
+fastapi==0.143.0
+starlette==1.7.0
+uvicorn[standard]==0.54.0
+
+# ---- 模板 ----
+Jinja2==3.1.6
+
+# ---- 数据校验与配置 ----
+pydantic==2.14.0
+pydantic-settings==2.15.0
+python-dotenv==1.2.4
+
+# ---- 数据库 ----
+SQLAlchemy[asyncio]==2.1.4
+aiosqlite==0.22.1
+greenlet==3.5.6
+alembic==1.20.0
+
+# ---- 表单 / 文件上传 ----
+python-multipart==0.0.32
+
+# ---- 安全 ----
+bcrypt==5.0.0
+
+# ---- 定时任务（过期清理、日志清理）----
+APScheduler==3.11.3
+tzlocal==5.4.4
+
+# ---- 时区数据（容器里没有系统 tzdata）----
+tzdata==2026.5

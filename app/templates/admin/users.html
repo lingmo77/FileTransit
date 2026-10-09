@@ -1,0 +1,150 @@
+{% extends "admin/base_admin.html" %}
+{% from "partials/pagination.html" import pager %}
+
+{% block title %}用户管理 · {{ cfg.name }}{% endblock %}
+
+{% block admin_content %}
+  <div class="page-head">
+    <div>
+      <h1>用户管理</h1>
+      <p class="subtitle">共 {{ result.total }} 个账号</p>
+    </div>
+    <button type="button" class="btn btn-primary" data-action="new-user">
+      {{ icon('plus', 16) }} 新建用户
+    </button>
+  </div>
+
+  <form class="toolbar" method="get" action="/admin/users">
+    <input
+      type="search"
+      name="q"
+      value="{{ q }}"
+      placeholder="搜索用户名或邮箱"
+      style="width: 220px"
+      autocomplete="off"
+    />
+    <select name="status" style="width: 150px" onchange="this.form.submit()">
+      <option value="">全部状态</option>
+      <option value="active" {% if status == 'active' %}selected{% endif %}>已启用</option>
+      <option value="disabled" {% if status == 'disabled' %}selected{% endif %}>已禁用</option>
+      <option value="pending" {% if status == 'pending' %}selected{% endif %}>邮箱未验证</option>
+      <option value="admin" {% if status == 'admin' %}selected{% endif %}>管理员</option>
+    </select>
+    <button class="btn btn-sm" type="submit">{{ icon('search', 15) }} 筛选</button>
+    {% if q or status %}
+      <a class="btn btn-sm btn-ghost" href="/admin/users">清除</a>
+    {% endif %}
+  </form>
+
+  <section class="card">
+    {% if result.items %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>用户</th>
+              <th>配额使用</th>
+              <th>状态</th>
+              <th>最后登录</th>
+              <th class="col-tight">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in result.items %}
+              <tr>
+                <td>
+                  <div style="font-weight: 550">{{ user.username }}</div>
+                  <div class="tiny muted">
+                    {{ user.email }}
+                    {% if user.email_verified %}
+                      <span class="badge badge-success">已验证</span>
+                    {% else %}
+                      <span class="badge badge-warning">未验证</span>
+                    {% endif %}
+                  </div>
+                </td>
+                <td>
+                  <div class="small">
+                    {{ user.used_files }}
+                    {% if user.quota_max_files is none %}<span class="muted">/ 默认</span>
+                    {% elif user.quota_max_files < 0 %}<span class="muted">/ 不限</span>
+                    {% else %}<span class="muted">/ {{ user.quota_max_files }}</span>{% endif %}
+                    个文件
+                  </div>
+                  <div class="tiny muted">
+                    {{ user.used_bytes | human_size }}
+                    {% if user.quota_max_bytes is not none and user.quota_max_bytes >= 0 %}
+                      / {{ user.quota_max_bytes | human_size }}
+                    {% endif %}
+                  </div>
+                </td>
+                <td>
+                  {% if user.is_admin %}<span class="badge badge-primary">管理员</span>{% endif %}
+                  {% if user.is_active %}
+                    <span class="badge badge-success">正常</span>
+                  {% else %}
+                    <span class="badge badge-danger">已禁用</span>
+                  {% endif %}
+                  {% if user.must_change_password %}
+                    <span class="badge badge-warning">待改密</span>
+                  {% endif %}
+                </td>
+                <td class="nowrap tiny muted">
+                  {% if user.last_login_at %}
+                    {{ user.last_login_at | fmt_dt(cfg.timezone) }}
+                    <div>{{ user.last_login_ip or '-' }}</div>
+                  {% else %}
+                    从未登录
+                  {% endif %}
+                </td>
+                <td class="actions">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost"
+                    data-action="edit-user"
+                    data-id="{{ user.id }}"
+                    data-username="{{ user.username }}"
+                    data-email="{{ user.email }}"
+                    data-admin="{{ 'true' if user.is_admin else 'false' }}"
+                    data-active="{{ 'true' if user.is_active else 'false' }}"
+                    data-verified="{{ 'true' if user.email_verified else 'false' }}"
+                    data-quota-files="{{ user.quota_max_files if user.quota_max_files is not none else '' }}"
+                    data-quota-bytes="{{ user.quota_max_bytes if user.quota_max_bytes is not none else '' }}"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost"
+                    data-action="recount-user"
+                    data-id="{{ user.id }}"
+                    title="按实际未过期文件重算用量"
+                  >
+                    重算
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost btn-danger"
+                    data-action="delete-user"
+                    data-id="{{ user.id }}"
+                    data-username="{{ user.username }}"
+                  >
+                    删除
+                  </button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-foot">
+        {{ pager(result, '/admin/users', {'q': q, 'status': status}) }}
+      </div>
+    {% else %}
+      <div class="empty">
+        <div class="icon">{{ icon('users', 26) }}</div>
+        <p>没有符合条件的用户</p>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

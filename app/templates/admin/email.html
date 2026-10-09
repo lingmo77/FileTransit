@@ -1,0 +1,182 @@
+{% extends "admin/base_admin.html" %}
+
+{% block title %}邮件服务 · {{ cfg.name }}{% endblock %}
+
+{% block admin_content %}
+  <div class="page-head">
+    <div>
+      <h1>邮件服务</h1>
+      <p class="subtitle">用于发送注册验证邮件与密码重置邮件</p>
+    </div>
+    {% if cfg.smtp_configured %}
+      <span class="badge badge-success">已配置</span>
+    {% else %}
+      <span class="badge badge-warning">未配置</span>
+    {% endif %}
+  </div>
+
+  {% if not cfg.smtp_configured %}
+    <div class="alert alert-warning" style="margin-bottom: 18px">
+      {{ icon('alert', 16) }}
+      <div>
+        还没有配置 SMTP。在配置完成前，用户注册后收不到验证邮件，
+        后台「需要邮箱验证」的开关建议暂时关闭或手动为用户标记已验证。
+      </div>
+    </div>
+  {% endif %}
+
+  <form data-form="settings">
+    <section class="card" style="margin-bottom: 18px">
+      <div class="card-head"><h2>{{ icon('mail', 17) }} SMTP 服务器</h2></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="field">
+            <label for="smtp-host">SMTP 服务器地址</label>
+            <input
+              type="text"
+              id="smtp-host"
+              name="email.smtp_host"
+              value="{{ values.get('email.smtp_host', '') }}"
+              placeholder="smtp.163.com"
+              autocomplete="off"
+            />
+          </div>
+          <div class="field">
+            <label for="smtp-port">端口</label>
+            <input
+              type="number"
+              id="smtp-port"
+              name="email.smtp_port"
+              data-type="int"
+              min="1"
+              max="65535"
+              value="{{ values.get('email.smtp_port', 465) }}"
+            />
+            <span class="help">SSL 常用 465，STARTTLS 常用 587</span>
+          </div>
+          <div class="field">
+            <label for="smtp-encryption">加密方式</label>
+            {% set enc = values.get('email.encryption', 'ssl') %}
+            <select id="smtp-encryption" name="email.encryption">
+              <option value="ssl" {% if enc == 'ssl' %}selected{% endif %}>SSL / TLS（推荐）</option>
+              <option value="starttls" {% if enc == 'starttls' %}selected{% endif %}>STARTTLS</option>
+              <option value="none" {% if enc == 'none' %}selected{% endif %}>不加密</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="smtp-timeout">超时（秒）</label>
+            <input
+              type="number"
+              id="smtp-timeout"
+              name="email.timeout"
+              data-type="int"
+              min="5"
+              max="120"
+              value="{{ values.get('email.timeout', 20) }}"
+            />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-bottom: 18px">
+      <div class="card-head"><h2>{{ icon('key', 17) }} 账号与发件人</h2></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="field">
+            <label for="smtp-username">登录账号</label>
+            <input
+              type="text"
+              id="smtp-username"
+              name="email.username"
+              value="{{ values.get('email.username', '') }}"
+              placeholder="通常是完整邮箱地址"
+              autocomplete="off"
+            />
+          </div>
+          <div class="field">
+            <label for="smtp-password">登录密码 / 授权码</label>
+            <input
+              type="password"
+              id="smtp-password"
+              name="email.password"
+              data-skip-empty="true"
+              placeholder="{{ '已保存，留空则保持不变' if values.get('email.has_password') else '请输入密码或授权码' }}"
+              autocomplete="new-password"
+            />
+            <span class="help">加密后保存在数据库中，不会明文回显</span>
+          </div>
+          <div class="field">
+            <label for="from-name">发件人名称</label>
+            <input
+              type="text"
+              id="from-name"
+              name="email.from_name"
+              value="{{ values.get('email.from_name', '') }}"
+              placeholder="{{ cfg.name }}"
+            />
+          </div>
+          <div class="field">
+            <label for="from-address">发件人邮箱</label>
+            <input
+              type="email"
+              id="from-address"
+              name="email.from_address"
+              value="{{ values.get('email.from_address', '') }}"
+              placeholder="noreply@example.com"
+            />
+          </div>
+        </div>
+      </div>
+      <div class="card-foot row" style="justify-content: flex-end">
+        <button type="submit" class="btn btn-primary">{{ icon('save', 16) }} 保存配置</button>
+      </div>
+    </section>
+  </form>
+
+  <div class="detail-grid">
+    <section class="card">
+      <div class="card-head"><h2>{{ icon('send', 17) }} 发送测试邮件</h2></div>
+      <form data-form="mail-test">
+        <div class="card-body">
+          <div class="field" style="margin-bottom: 0">
+            <label for="test-to">收件地址</label>
+            <input
+              type="email"
+              id="test-to"
+              name="to"
+              value="{{ current_user.email }}"
+              required
+            />
+            <span class="help">会以当前配置实时连接 SMTP 发送，失败时返回具体错误</span>
+          </div>
+        </div>
+        <div class="card-foot row" style="justify-content: flex-end">
+          <button type="submit" class="btn">{{ icon('send', 16) }} 发送测试邮件</button>
+        </div>
+      </form>
+    </section>
+
+    <aside class="card">
+      <div class="card-head"><h2>常见服务商</h2></div>
+      <div class="card-body small muted" style="display: flex; flex-direction: column; gap: 10px">
+        <div>
+          <strong style="color: var(--text)">163 邮箱</strong><br />
+          smtp.163.com · 465 · SSL · 密码填「授权码」
+        </div>
+        <div>
+          <strong style="color: var(--text)">QQ 邮箱</strong><br />
+          smtp.qq.com · 465 · SSL · 密码填「授权码」
+        </div>
+        <div>
+          <strong style="color: var(--text)">Gmail</strong><br />
+          smtp.gmail.com · 465 · SSL · 需使用应用专用密码
+        </div>
+        <div>
+          <strong style="color: var(--text)">自建 / 企业邮箱</strong><br />
+          按服务商提供的主机、端口与加密方式填写
+        </div>
+      </div>
+    </aside>
+  </div>
+{% endblock %}

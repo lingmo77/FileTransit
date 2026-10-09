@@ -1,0 +1,8 @@
+# 开发/测试依赖：先装 requirements.txt 再装这个
+#   pip install -r requirements-dev.txt
+-r requirements.txt
+
+pytest==9.1.1
+pytest-asyncio==1.4.0
+# 测试通过 ASGI 直接打应用，不需要真的起服务器
+httpx==0.28.1

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% from "partials/pagination.html" import pager %}
+{% from "partials/file_card.html" import file_card with context %}
+
+{% block title %}{{ cfg.name }} · 最近上传的文件{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>最近上传</h1>
+      <p class="subtitle">
+        {% if cfg.subtitle %}{{ cfg.subtitle }}{% endif %}
+      </p>
+    </div>
+    <div class="row small muted">
+      <span class="badge badge-primary">{{ total_files }} 个文件</span>
+      <span class="badge">{{ total_bytes | human_size }}</span>
+    </div>
+  </div>
+
+  <form class="card card-pad" method="get" action="/" style="margin-bottom: 20px">
+    <div class="row" style="gap: 10px; align-items: flex-end">
+      <div class="field grow" style="margin-bottom: 0">
+        <label for="q">搜索文件名</label>
+        <input
+          id="q"
+          type="search"
+          name="q"
+          value="{{ q }}"
+          placeholder="输入关键字，回车搜索"
+          autocomplete="off"
+        />
+      </div>
+      <div class="field" style="margin-bottom: 0; min-width: 150px">
+        <label for="kind">类型</label>
+        <select id="kind" name="kind" onchange="this.form.submit()">
+          <option value="">全部类型</option>
+          {% for key, label in categories.items() %}
+            <option value="{{ key }}" {% if kind == key %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">{{ icon('search', 16) }} 搜索</button>
+      {% if q or kind %}
+        <a class="btn btn-ghost" href="/">重置</a>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if result.items %}
+    <div class="file-grid">
+      {% for item in result.items %}
+        {{ file_card(item) }}
+      {% endfor %}
+    </div>
+
+    {{ pager(result, '/', {'q': q, 'kind': kind}) }}
+  {% else %}
+    <div class="card empty">
+      <div class="icon">{{ icon('inbox', 26) }}</div>
+      {% if q or kind %}
+        <p>没有找到符合条件的文件</p>
+        <a class="btn btn-sm" href="/">清除筛选条件</a>
+      {% else %}
+        <p>暂时还没有人上传文件</p>
+        {% if current_user %}
+          <a class="btn btn-primary btn-sm" href="/dashboard">去上传第一个文件</a>
+        {% else %}
+          <a class="btn btn-primary btn-sm" href="/login">登录后上传</a>
+        {% endif %}
+      {% endif %}
+    </div>
+  {% endif %}
+{% endblock %}

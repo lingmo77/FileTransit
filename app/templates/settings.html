@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block title %}账号设置 · {{ cfg.name }}{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>账号设置</h1>
+      <p class="subtitle">管理你的账号资料、密码与登录会话</p>
+    </div>
+  </div>
+
+  {% if force_password %}
+    <div class="alert alert-warning" style="margin-bottom: 18px">
+      {{ icon('shield', 17) }}
+      <div>
+        <strong>请先修改初始密码。</strong>
+        为了账号安全，在修改密码之前无法使用其它功能。
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="detail-grid">
+    <div class="stack" style="display: flex; flex-direction: column; gap: 18px">
+      <!-- 账号资料 -->
+      <section class="card">
+        <div class="card-head">
+          <h2>{{ icon('user', 17) }} 账号资料</h2>
+        </div>
+        <div class="card-body">
+          <dl class="kv" style="margin-top: 0">
+            <dt>用户名</dt>
+            <dd>
+              {{ current_user.username }}
+              {% if current_user.is_admin %}
+                <span class="badge badge-primary">管理员</span>
+              {% endif %}
+            </dd>
+            <dt>邮箱</dt>
+            <dd>
+              {{ current_user.email }}
+              {% if current_user.email_verified %}
+                <span class="badge badge-success">已验证</span>
+              {% else %}
+                <span class="badge badge-danger">未验证</span>
+              {% endif %}
+            </dd>
+            <dt>注册时间</dt>
+            <dd>{{ current_user.created_at | fmt_dt(cfg.timezone) }}</dd>
+            <dt>配额使用</dt>
+            <dd>
+              {{ quota.used_files }}/{{ '∞' if quota.unlimited_files else quota.max_files }} 个文件 ·
+              {{ quota.used_bytes | human_size }}/{{ '∞' if quota.unlimited_bytes else (quota.max_bytes | human_size) }}
+            </dd>
+          </dl>
+
+          <form id="email-form" style="margin-top: 20px" autocomplete="off">
+            <div class="field">
+              <label for="email">更换邮箱</label>
+              <input type="email" id="email" name="email" value="{{ current_user.email }}" required />
+              <span class="help">更换后需要重新完成邮箱验证</span>
+            </div>
+            <button type="submit" class="btn">{{ icon('mail', 16) }} 更新邮箱</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- 修改密码 -->
+      <section class="card" id="password-card">
+        <div class="card-head">
+          <h2>{{ icon('key', 17) }} 修改密码</h2>
+        </div>
+        <div class="card-body">
+          <form id="password-form" autocomplete="off">
+            <div class="field">
+              <label for="current">当前密码</label>
+              <input type="password" id="current" name="current" required autocomplete="current-password" />
+            </div>
+            <div class="field">
+              <label for="password">新密码</label>
+              <input type="password" id="password" name="password" required autocomplete="new-password" />
+              <span class="help">至少 8 位，建议包含字母与数字</span>
+            </div>
+            <div class="field">
+              <label for="confirm">确认新密码</label>
+              <input type="password" id="confirm" name="confirm" required autocomplete="new-password" />
+            </div>
+            <button type="submit" class="btn btn-primary">{{ icon('lock', 16) }} 保存新密码</button>
+            <p class="tiny muted" style="margin: 10px 0 0">修改密码后，其它设备上的登录会话会被自动下线。</p>
+          </form>
+        </div>
+      </section>
+    </div>
+
+    <aside class="stack" style="display: flex; flex-direction: column; gap: 18px">
+      <!-- 登录会话 -->
+      <section class="card">
+        <div class="card-head">
+          <h2>{{ icon('shield', 17) }} 登录会话</h2>
+          <span class="muted small">最近 {{ sessions | length }} 条</span>
+        </div>
+        <div class="card-body" style="padding: 0">
+          {% if sessions %}
+            <ul class="list-plain">
+              {% for session in sessions %}
+                <li style="padding: 12px 18px; border-bottom: 1px solid var(--border)">
+                  <div class="spread" style="gap: 8px">
+                    <span class="small" style="font-weight: 500">
+                      {{ session.ip_address or '未知 IP' }}
+                    </span>
+                    <span class="tiny muted">{{ session.last_seen_at | fmt_dt(cfg.timezone) }}</span>
+                  </div>
+                  <div class="tiny muted" style="margin-top: 4px; word-break: break-all">
+                    {{ (session.user_agent or '未知设备') | truncate(90) }}
+                  </div>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="small muted" style="padding: 16px 18px; margin: 0">暂无其它会话</p>
+          {% endif %}
+        </div>
+      </section>
+
+      <!-- 最近活动 -->
+      <section class="card">
+        <div class="card-head">
+          <h2>{{ icon('clock', 17) }} 最近活动</h2>
+        </div>
+        <div class="card-body" style="padding: 0">
+          {% if logs %}
+            <ul class="list-plain">
+              {% for log in logs %}
+                <li style="padding: 10px 18px; border-bottom: 1px solid var(--border)">
+                  <div class="spread" style="gap: 8px">
+                    <span class="small">
+                      {{ ACTION_LABELS.get(log.action, log.action) }}
+                      {% if log.status != 'success' %}
+                        <span class="badge badge-danger">失败</span>
+                      {% endif %}
+                    </span>
+                    <span class="tiny muted">{{ log.created_at | fmt_dt(cfg.timezone) }}</span>
+                  </div>
+                  <div class="tiny muted" style="margin-top: 3px">
+                    {{ log.ip_address or '-' }}
+                    {% if log.browser %} · {{ log.browser }}{% endif %}
+                  </div>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="small muted" style="padding: 16px 18px; margin: 0">暂无活动记录</p>
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-body">
+          <button type="button" class="btn btn-danger btn-block" data-logout>
+            {{ icon('logout', 16) }} 退出登录
+          </button>
+        </div>
+      </section>
+    </aside>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    (function () {
+      var emailForm = document.getElementById('email-form');
+      emailForm.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        var button = emailForm.querySelector('button[type="submit"]');
+        var restore = FT.busy(button, true);
+        try {
+          var data = await FT.request('/api/auth/update-profile', {
+            method: 'POST',
+            body: { email: document.getElementById('email').value.trim() },
+          });
+          FT.toast(data.message || '已更新', 'success');
+          setTimeout(function () {
+            window.location.reload();
+          }, 1200);
+        } catch (error) {
+          FT.toast(error.message, 'error');
+          restore();
+        }
+      });
+
+      var passwordForm = document.getElementById('password-form');
+      passwordForm.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        var current = document.getElementById('current').value;
+        var password = document.getElementById('password').value;
+        var confirm = document.getElementById('confirm').value;
+
+        if (password !== confirm) {
+          FT.toast('两次输入的新密码不一致', 'error');
+          return;
+        }
+        if (password.length < 8) {
+          FT.toast('新密码至少需要 8 位', 'error');
+          return;
+        }
+
+        var button = passwordForm.querySelector('button[type="submit"]');
+        var restore = FT.busy(button, true);
+        try {
+          var data = await FT.request('/api/auth/change-password', {
+            method: 'POST',
+            body: { current: current, password: password },
+          });
+          FT.toast(data.message || '密码已更新', 'success');
+          passwordForm.reset();
+          if ({{ 'true' if force_password else 'false' }}) {
+            setTimeout(function () {
+              window.location.href = '/dashboard';
+            }, 1000);
+          }
+        } catch (error) {
+          FT.toast(error.message, 'error');
+        } finally {
+          restore();
+        }
+      });
+
+      {% if force_password %}
+        document.getElementById('current').focus();
+      {% endif %}
+    })();
+  </script>
+{% endblock %}

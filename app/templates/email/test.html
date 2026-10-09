@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SMTP 测试</title>
+  </head>
+  <body style="margin: 0; padding: 0; background: #f4f5f7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background: #f4f5f7; padding: 32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 520px; background: #ffffff; border-radius: 14px; box-shadow: 0 2px 12px rgba(16, 24, 40, 0.06);">
+            <tr>
+              <td style="padding: 30px 32px;">
+                <div style="font-size: 17px; font-weight: 700; color: #171a1f;">{{ site_name }}</div>
+                <div
+                  style="display: inline-block; margin: 16px 0 12px; padding: 3px 10px; border-radius: 999px; background: rgba(31, 157, 85, 0.12); color: #1f9d55; font-size: 12.5px; font-weight: 600;"
+                >
+                  配置正常
+                </div>
+                <h1 style="margin: 0 0 10px; font-size: 20px; font-weight: 680; color: #171a1f;">
+                  测试邮件发送成功
+                </h1>
+                <p style="margin: 0; font-size: 15px; line-height: 1.7; color: #4a5261;">
+                  如果你读到这封邮件，说明「{{ site_name }}」的 SMTP 配置是正确的，
+                  现在可以正常发送注册验证邮件和密码重置邮件了。
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 0 32px 30px;">
+                <div style="border-top: 1px solid #e3e6ec; padding-top: 16px; font-size: 12.5px; line-height: 1.7; color: #7b8494;">
+                  这封邮件由管理员在后台手动触发，无需任何操作。
+                </div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

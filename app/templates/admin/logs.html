@@ -1,0 +1,185 @@
+{% extends "admin/base_admin.html" %}
+{% from "partials/pagination.html" import pager %}
+
+{% block title %}操作日志 · {{ cfg.name }}{% endblock %}
+
+{% block admin_content %}
+  <div class="page-head">
+    <div>
+      <h1>操作日志</h1>
+      <p class="subtitle">
+        共 {{ result.total }} 条记录 · 记录登录时间、IP、浏览器、上传文件等详细信息
+      </p>
+    </div>
+    <a
+      class="btn btn-sm"
+      href="{{ page_url('/admin/api/logs/export', filters) }}"
+      title="导出当前筛选结果（CSV）"
+    >
+      {{ icon('download', 15) }} 导出 CSV
+    </a>
+  </div>
+
+  <!-- 筛选 -->
+  <form class="card card-pad" id="log-filter-form" method="get" action="/admin/logs" style="margin-bottom: 16px">
+    <div class="form-grid">
+      <div class="field">
+        <label for="f-q">关键词</label>
+        <input type="search" id="f-q" name="q" value="{{ filters.q }}" placeholder="用户名 / IP / 路径" />
+      </div>
+      <div class="field">
+        <label for="f-action">动作类型</label>
+        <select id="f-action" name="action">
+          <option value="">全部动作</option>
+          {% for key, label in action_labels.items() %}
+            <option value="{{ key }}" {% if filters.action == key %}selected{% endif %}>
+              {{ label }}{% if counts.get(key) %}（{{ counts[key] }}）{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-status">结果</label>
+        <select id="f-status" name="status">
+          <option value="">全部</option>
+          <option value="success" {% if filters.status == 'success' %}selected{% endif %}>成功</option>
+          <option value="failure" {% if filters.status == 'failure' %}selected{% endif %}>失败</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-ip">IP 地址</label>
+        <input type="text" id="f-ip" name="ip" value="{{ filters.ip }}" placeholder="精确或模糊匹配" />
+      </div>
+      <div class="field">
+        <label for="f-start">开始日期</label>
+        <input type="date" id="f-start" name="start" value="{{ filters.start }}" />
+      </div>
+      <div class="field">
+        <label for="f-end">结束日期</label>
+        <input type="date" id="f-end" name="end" value="{{ filters.end }}" />
+      </div>
+    </div>
+    <div class="row">
+      <button class="btn btn-primary btn-sm" type="submit">{{ icon('search', 15) }} 查询</button>
+      <a class="btn btn-sm btn-ghost" href="/admin/logs">重置</a>
+      <span class="tiny muted">日志保存在数据库 activity_logs 表中，也可以直接用 SQL 工具查看。</span>
+    </div>
+  </form>
+
+  <!-- 清空面板 -->
+  <details class="card" style="margin-bottom: 18px">
+    <summary
+      style="padding: 14px 20px; cursor: pointer; font-weight: 550; font-size: 0.92rem"
+    >
+      按时间范围清空日志（节省磁盘空间）
+    </summary>
+    <div class="card-body" style="border-top: 1px solid var(--border)">
+      <div class="form-grid">
+        <div class="field">
+          <label for="purge-before">清空此日期（含当天）及更早的日志</label>
+          <input type="date" id="purge-before" />
+        </div>
+        <div class="field">
+          <label for="purge-after">清空此日期及之后的日志</label>
+          <input type="date" id="purge-after" />
+        </div>
+        <div class="field">
+          <label for="purge-action">仅清空该类型</label>
+          <select id="purge-action">
+            <option value="">全部类型</option>
+            {% for key, label in action_labels.items() %}
+              <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <label class="checkbox" style="margin-bottom: 12px">
+        <input type="checkbox" id="purge-vacuum" checked />
+        <span>清理后回收数据库空间（VACUUM，大库耗时较长）</span>
+      </label>
+      <div class="alert alert-warning" style="margin-bottom: 14px">
+        {{ icon('alert', 16) }}
+        <div>清空操作不可恢复。为避免误删，必须至少指定一个条件。</div>
+      </div>
+      <button type="button" class="btn btn-danger" data-action="purge-logs">
+        {{ icon('trash', 16) }} 执行清空
+      </button>
+    </div>
+  </details>
+
+  <!-- 列表 -->
+  <section class="card">
+    {% if result.items %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="col-tight">时间</th>
+              <th>用户</th>
+              <th>动作</th>
+              <th>IP / 客户端</th>
+              <th class="col-tight">结果</th>
+              <th class="col-tight"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for log in result.items %}
+              <tr>
+                <td class="nowrap tiny muted">{{ log.created_at | fmt_dt(cfg.timezone) }}</td>
+                <td class="nowrap small">
+                  {{ log.username }}
+                  {% if log.user_id %}<div class="tiny muted">#{{ log.user_id }}</div>{% endif %}
+                </td>
+                <td class="nowrap small">
+                  {{ action_labels.get(log.action, log.action) }}
+                  {% if log.target_type %}
+                    <div class="tiny muted">{{ log.target_type }}:{{ log.target_id }}</div>
+                  {% endif %}
+                </td>
+                <td style="max-width: 300px">
+                  <div class="small">{{ log.ip_address or '-' }}</div>
+                  <div class="tiny muted truncate">
+                    {{ log.browser or '未知' }} · {{ log.os_name or '未知' }}
+                    {% if log.device %} · {{ log.device }}{% endif %}
+                  </div>
+                </td>
+                <td class="nowrap">
+                  {% if log.status == 'success' %}
+                    <span class="badge badge-success">成功</span>
+                  {% else %}
+                    <span class="badge badge-danger">失败</span>
+                  {% endif %}
+                </td>
+                <td class="actions">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost"
+                    data-action="log-detail"
+                    data-detail="{{ log.detail or '' }}"
+                    data-time="{{ log.created_at | fmt_dt(cfg.timezone, '%Y-%m-%d %H:%M:%S') }}"
+                    data-user="{{ log.username }}"
+                    data-action-label="{{ action_labels.get(log.action, log.action) }}"
+                    data-ip="{{ log.ip_address or '-' }}"
+                    data-browser="{{ log.browser or '-' }}"
+                    data-os="{{ log.os_name or '-' }}"
+                    data-ua="{{ log.user_agent or '-' }}"
+                  >
+                    详情
+                  </button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-foot">
+        {{ pager(result, '/admin/logs', filters) }}
+      </div>
+    {% else %}
+      <div class="empty">
+        <div class="icon">{{ icon('list', 26) }}</div>
+        <p>没有符合条件的日志</p>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

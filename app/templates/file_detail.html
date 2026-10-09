@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}{{ item.original_name }} · {{ cfg.name }}{% endblock %}
+
+{% block content %}
+  {% set cat = item.mime_type | file_category(item.original_name) %}
+  {% set link = '/download/' ~ item.public_id ~ '/' ~ (item.original_name | urlencode) %}
+
+  <div style="margin-bottom: 16px">
+    <a class="small muted" href="/">← 返回首页</a>
+  </div>
+
+  <div class="detail-grid">
+    <div class="card">
+      <div class="card-body">
+        <div class="file-top" style="gap: 14px">
+          <div class="file-icon cat-{{ cat }}" style="width: 52px; height: 52px">
+            {{ item.original_name | ext or 'FILE' }}
+          </div>
+          <div class="grow">
+            <h1 style="font-size: 1.15rem; word-break: break-all; margin: 0 0 6px">
+              {{ item.original_name }}
+            </h1>
+            <div class="row" style="gap: 6px">
+              <span class="badge badge-primary">{{ CATEGORY_LABELS.get(cat, '文件') }}</span>
+              {% if item.is_expired %}
+                <span class="badge badge-danger">已过期</span>
+              {% elif item.expires_at is none %}
+                <span class="badge badge-success">长期有效</span>
+              {% elif item.expires_at | is_expiring_soon %}
+                <span class="badge badge-warning">即将过期</span>
+              {% else %}
+                <span class="badge badge-success">可下载</span>
+              {% endif %}
+              {% if not item.is_public %}
+                <span class="badge badge-warning">仅自己可见</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <dl class="kv" style="margin: 22px 0 0">
+          <dt>文件大小</dt>
+          <dd>{{ item.size | human_size }}</dd>
+          <dt>文件类型</dt>
+          <dd>{{ item.mime_type }}</dd>
+          <dt>上传者</dt>
+          <dd>{{ item.owner.username if item.owner else '未知' }}</dd>
+          <dt>上传时间</dt>
+          <dd>{{ item.created_at | fmt_dt(cfg.timezone) }}</dd>
+          <dt>过期时间</dt>
+          <dd>
+            {% if item.expires_at is none %}
+              <span class="badge badge-success">长期有效</span>
+              <span class="muted small">（不会自动删除）</span>
+            {% else %}
+              {{ item.expires_at | fmt_dt(cfg.timezone) }}
+              <span class="muted small">（{{ item.expires_at | remaining(cfg.timezone) }}后自动删除）</span>
+            {% endif %}
+          </dd>
+          <dt>下载次数</dt>
+          <dd>{{ item.download_count }}</dd>
+          {% if item.sha256 %}
+            <dt>SHA-256</dt>
+            <dd class="mono tiny">{{ item.sha256 }}</dd>
+          {% endif %}
+        </dl>
+      </div>
+
+      <div class="card-foot">
+        <div class="row">
+          {% if expired %}
+            <span class="badge badge-danger">文件已过期，无法下载</span>
+          {% else %}
+            <a class="btn btn-primary btn-lg" href="{{ link }}" rel="nofollow">
+              {{ icon('download', 17) }} 下载文件
+            </a>
+            <button type="button" class="btn" data-copy="{{ link }}">
+              {{ icon('copy', 16) }} 复制直链
+            </button>
+            {% if is_owner %}
+              <button
+                type="button"
+                class="btn btn-danger"
+                data-delete-file="{{ item.id }}"
+                data-name="{{ item.original_name }}"
+                data-redirect="/dashboard"
+              >
+                {{ icon('trash', 16) }} 删除
+              </button>
+            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <aside class="card">
+      <div class="card-head"><h2>下载提示</h2></div>
+      <div class="card-body small muted" style="display: flex; flex-direction: column; gap: 12px">
+        <p style="margin: 0">
+          把上面的直链粘贴到 <strong style="color: var(--text)">IDM</strong>、
+          <strong style="color: var(--text)">迅雷</strong> 或
+          <strong style="color: var(--text)">aria2</strong>，
+          即可启用多线程分片下载。
+        </p>
+        <p style="margin: 0">服务器已开启 HTTP Range 支持（断点续传 / 多连接下载）。</p>
+        <div class="alert">
+          {{ icon('clock', 16) }}
+          {% if item.expires_at is none %}
+            <div>该文件长期有效，<strong>不会自动删除</strong>。</div>
+          {% else %}
+            <div>文件将于 <strong>{{ item.expires_at | fmt_dt(cfg.timezone) }}</strong> 自动删除，请及时转存。</div>
+          {% endif %}
+        </div>
+      </div>
+    </aside>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    document.querySelectorAll('[data-delete-file]').forEach(function (button) {
+      button.addEventListener('click', async function () {
+        var name = button.getAttribute('data-name') || '该文件';
+        if (!window.confirm('确定删除「' + name + '」吗？此操作不可恢复。')) return;
+
+        var restore = FT.busy(button, true);
+        try {
+          await FT.request('/api/files/' + button.getAttribute('data-delete-file'), {
+            method: 'DELETE',
+          });
+          FT.toast('文件已删除', 'success');
+          var target = button.getAttribute('data-redirect');
+          if (target) {
+            setTimeout(function () {
+              window.location.href = target;
+            }, 600);
+          } else {
+            restore();
+          }
+        } catch (error) {
+          FT.toast(error.message, 'error');
+          restore();
+        }
+      });
+    });
+  </script>
+{% endblock %}

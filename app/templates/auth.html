@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {%- if mode == 'register' %}注册{% elif mode == 'forgot' %}找回密码{% elif mode == 'reset' %}重置密码{% else %}登录{% endif %} · {{ cfg.name }}
+{% endblock %}
+
+{% block content %}
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-head">
+        <div class="mark">{{ icon('upload', 22) }}</div>
+        <h1 style="font-size: 1.25rem">
+          {% if mode == 'register' %}创建账号
+          {% elif mode == 'forgot' %}找回密码
+          {% elif mode == 'reset' %}设置新密码
+          {% else %}登录 {{ cfg.name }}{% endif %}
+        </h1>
+        <p class="small muted" style="margin: 0">
+          {% if mode == 'register' %}
+            注册后需要完成邮箱验证才能登录
+          {% elif mode == 'forgot' %}
+            输入注册邮箱，我们会发送重置链接
+          {% elif mode == 'reset' %}
+            请输入新的登录密码
+          {% else %}
+            {{ cfg.subtitle }}
+          {% endif %}
+        </p>
+      </div>
+
+      {% if mode in ('login', 'register') %}
+        <div class="auth-tabs">
+          <a href="/login" class="{% if mode == 'login' %}active{% endif %}">登录</a>
+          {% if cfg.registration_enabled %}
+            <a href="/register" class="{% if mode == 'register' %}active{% endif %}">注册</a>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      {% if mode == 'register' and not registration_enabled %}
+        <div class="alert alert-warning">
+          {{ icon('alert', 17) }}
+          <div>本站当前已关闭注册。如需账号请联系管理员开通。</div>
+        </div>
+        <p style="margin-top: 18px; text-align: center">
+          <a href="/login">返回登录</a>
+        </p>
+      {% elif mode == 'register' and not cfg.smtp_configured %}
+        <div class="alert alert-warning">
+          {{ icon('alert', 17) }}
+          <div>
+            管理员尚未配置邮件服务器，注册验证邮件无法送达。<br />
+            请先联系管理员完成 SMTP 配置。
+          </div>
+        </div>
+        <p style="margin-top: 18px; text-align: center">
+          <a href="/login">返回登录</a>
+        </p>
+      {% else %}
+        <form id="auth-form" novalidate>
+          {% if mode == 'login' %}
+            <div class="field">
+              <label for="login">用户名或邮箱</label>
+              <input
+                id="login"
+                name="login"
+                type="text"
+                autocomplete="username"
+                autofocus
+                required
+              />
+            </div>
+            <div class="field">
+              <label for="password">密码</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                required
+              />
+            </div>
+            <input type="hidden" name="next" value="{{ next_url | default('/dashboard') }}" />
+          {% elif mode == 'register' %}
+            <div class="field">
+              <label for="username">用户名</label>
+              <input
+                id="username"
+                name="username"
+                type="text"
+                autocomplete="username"
+                autofocus
+                required
+                minlength="3"
+                maxlength="32"
+              />
+              <span class="help">3-32 位，支持中英文、数字、下划线</span>
+            </div>
+            <div class="field">
+              <label for="email">邮箱</label>
+              <input id="email" name="email" type="email" autocomplete="email" required />
+              <span class="help">用于接收验证邮件</span>
+            </div>
+            <div class="field">
+              <label for="password">密码</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="new-password"
+                required
+                minlength="8"
+              />
+              <span class="help">至少 8 位，需同时包含字母和数字</span>
+            </div>
+            <div class="field">
+              <label for="password2">确认密码</label>
+              <input
+                id="password2"
+                name="password2"
+                type="password"
+                autocomplete="new-password"
+                required
+              />
+            </div>
+          {% elif mode == 'forgot' %}
+            <div class="field">
+              <label for="email">注册邮箱</label>
+              <input id="email" name="email" type="email" autocomplete="email" autofocus required />
+            </div>
+          {% elif mode == 'reset' %}
+            <div class="field">
+              <label for="password">新密码</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="new-password"
+                autofocus
+                required
+                minlength="8"
+              />
+              <span class="help">至少 8 位，需同时包含字母和数字</span>
+            </div>
+            <div class="field">
+              <label for="password2">确认新密码</label>
+              <input
+                id="password2"
+                name="password2"
+                type="password"
+                autocomplete="new-password"
+                required
+              />
+            </div>
+            <input type="hidden" name="token" value="{{ token }}" />
+          {% endif %}
+
+          <p class="form-error" id="auth-error" role="alert"></p>
+
+          <button type="submit" class="btn btn-primary btn-block btn-lg" id="auth-submit">
+            {% if mode == 'register' %}注册
+            {% elif mode == 'forgot' %}发送重置链接
+            {% elif mode == 'reset' %}重置密码
+            {% else %}登录{% endif %}
+          </button>
+        </form>
+
+        <p class="small" style="margin: 16px 0 0; text-align: center">
+          {% if mode == 'login' %}
+            <a href="/forgot">忘记密码？</a>
+          {% elif mode == 'register' %}
+            已有账号？<a href="/login">直接登录</a>
+          {% else %}
+            <a href="/login">返回登录</a>
+          {% endif %}
+        </p>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    (function () {
+      var form = document.getElementById('auth-form');
+      if (!form) return;
+
+      var mode = {{ mode | tojson }};
+      var errorBox = document.getElementById('auth-error');
+      var submit = document.getElementById('auth-submit');
+      {# 用 URLSearchParams 自动处理中文文件名等特殊字符 #}
+      var endpoint = {
+        login: '/api/auth/login',
+        register: '/api/auth/register',
+        forgot: '/api/auth/forgot',
+        reset: '/api/auth/reset',
+      }[mode];
+
+      function showError(message) {
+        errorBox.textContent = message || '';
+      }
+
+      form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        showError('');
+
+        var data = Object.fromEntries(new FormData(form).entries());
+        var password2 = data.password2;
+        delete data.password2;
+
+        if (password2 !== undefined && data.password !== password2) {
+          showError('两次输入的密码不一致');
+          return;
+        }
+
+        var restore = FT.busy(submit, true);
+        try {
+          var result = await FT.request(endpoint, { method: 'POST', body: data });
+          FT.toast((result && result.message) || '操作成功', 'success', 2200);
+          if (result && result.redirect) {
+            setTimeout(function () {
+              window.location.href = result.redirect;
+            }, 700);
+          }
+        } catch (error) {
+          showError(error.message);
+          restore();
+        }
+      });
+    })();
+  </script>
+{% endblock %}
