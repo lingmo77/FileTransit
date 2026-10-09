@@ -197,6 +197,85 @@ async def test_admin_cannot_delete_self_or_last_admin(admin):
     ).status_code == 400
 
 
+async def test_admin_can_toggle_permanent_save_permission(admin, user):
+    """需求：管理员在用户管理里指定哪些用户可以永久保存文件。"""
+    def _row(items):
+        return next(u for u in items if u["id"] == user["id"])
+
+    before = _row((await admin.get("/admin/api/users", params={"q": user["username"]})).json()["items"])
+    assert before["can_permanent"] is False
+    assert before["can_save_forever"] is False
+
+    granted = await admin.patch(f"/admin/api/users/{user['id']}", {"can_permanent": True})
+    assert granted.status_code == 200, granted.text
+    payload = granted.json()["user"]
+    assert payload["can_permanent"] is True
+    # 派生字段：前端只看这一个就知道该不该显示「长期有效」选项
+    assert payload["can_save_forever"] is True
+
+    # 列表接口也要带回来，否则前端刷新后勾选框会自己弹回去
+    listed = _row((await admin.get("/admin/api/users", params={"q": user["username"]})).json()["items"])
+    assert listed["can_permanent"] is True
+
+    # 用户管理页要显示徽标，并把当前值带给编辑弹窗
+    page = await admin.get("/admin/users", params={"q": user["username"]})
+    assert page.status_code == 200, page.text
+    assert 'data-permanent="true"' in page.text
+    assert "可永久保存" in page.text
+
+    revoked = await admin.patch(f"/admin/api/users/{user['id']}", {"can_permanent": False})
+    assert revoked.status_code == 200
+    assert revoked.json()["user"]["can_permanent"] is False
+    assert revoked.json()["user"]["can_save_forever"] is False
+
+
+async def test_admin_itself_always_can_save_forever_without_the_flag(admin):
+    """管理员不靠这个开关——即使 ``can_permanent`` 是 false，也天然可以永久保存。"""
+    me = (await admin.get("/api/auth/me")).json()["user"]
+    row = next(
+        u for u in (await admin.get("/admin/api/users", params={"q": "admin"})).json()["items"]
+        if u["id"] == me["id"]
+    )
+    assert row["is_admin"] is True
+    assert row["can_permanent"] is False
+    assert row["can_save_forever"] is True
+
+
+async def test_admin_can_create_user_already_granted(admin):
+    """新建用户时可以直接勾上「允许永久保存」。"""
+    username = unique("perm_")
+    created = await admin.post(
+        "/admin/api/users",
+        json={
+            "username": username,
+            "email": f"{username}@example.com",
+            "password": USER_PASSWORD,
+            "email_verified": True,
+            "can_permanent": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    user_id = created.json()["user"]["id"]
+    assert created.json()["user"]["can_permanent"] is True
+
+    # 不传就是默认不给，别把权限默认放开
+    plain_name = unique("plain_")
+    plain = await admin.post(
+        "/admin/api/users",
+        json={
+            "username": plain_name,
+            "email": f"{plain_name}@example.com",
+            "password": USER_PASSWORD,
+            "email_verified": True,
+        },
+    )
+    assert plain.status_code == 201, plain.text
+    assert plain.json()["user"]["can_permanent"] is False
+
+    for uid in (user_id, plain.json()["user"]["id"]):
+        assert (await admin.delete(f"/admin/api/users/{uid}")).status_code == 200
+
+
 async def test_deleting_user_removes_their_files(admin, transport, new_client):
     """需求 3 / 4：用户注销后，其文件随之清理，不留孤儿数据。"""
     from .conftest import create_verified_user
@@ -317,6 +396,25 @@ async def test_admin_stats_and_storage(admin, api, user):
 
     storage = (await admin.get("/admin/api/storage")).json()
     assert storage["disk_total"] > 0
+
+
+async def test_admin_dashboard_page_renders_with_files(admin, api, user):
+    """回归：库里有文件时后台首页必须渲染得出来。
+
+    模板要显示 ``item.owner.username``，而 ``stats.overview`` 的 recent 查询
+    一度漏了 ``selectinload(FileItem.owner)``——异步会话下访问没预加载的关联
+    是同步 IO，会抛 MissingGreenlet，整页 500。
+
+    关键在于**必须先传一个文件**：``recent_files`` 为空时模板里那段循环不执行，
+    关联根本不会被碰，所以这个 bug 只在有真实数据的库上才暴露，空库测不出来。
+    """
+    upload = await api.upload("dashboard.bin", b"d" * 512)
+    assert upload.status_code == 201, upload.text
+
+    response = await admin.get("/admin")
+    assert response.status_code == 200, response.text
+    # 「上传者」那一列渲染出来了，说明 owner 关联确实取到了
+    assert user["username"] in response.text
 
 
 async def test_manual_maintenance_run(admin, user):

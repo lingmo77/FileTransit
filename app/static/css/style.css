@@ -27,6 +27,8 @@
   --warning-soft: rgba(183, 121, 31, 0.14);
   --danger: #d64545;
   --danger-soft: rgba(214, 69, 69, 0.12);
+  --info: #6b46c1;
+  --info-soft: rgba(107, 70, 193, 0.12);
 
   --radius-sm: 8px;
   --radius: 12px;
@@ -65,6 +67,8 @@
   --warning-soft: rgba(226, 179, 77, 0.14);
   --danger: #ff6b6b;
   --danger-soft: rgba(255, 107, 107, 0.14);
+  --info: #a78bfa;
+  --info-soft: rgba(167, 139, 250, 0.18);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
@@ -959,6 +963,10 @@ select {
 .badge-danger {
   background: var(--danger-soft);
   color: var(--danger);
+}
+.badge-info {
+  background: var(--info-soft);
+  color: var(--info);
 }
 
 /* ---------------------------------------------------------------- 表格 */

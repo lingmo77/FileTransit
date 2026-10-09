@@ -88,6 +88,9 @@
                   {% if user.must_change_password %}
                     <span class="badge badge-warning">待改密</span>
                   {% endif %}
+                  {% if user.can_save_forever %}
+                    <span class="badge badge-info">可永久保存</span>
+                  {% endif %}
                 </td>
                 <td class="nowrap tiny muted">
                   {% if user.last_login_at %}
@@ -108,6 +111,7 @@
                     data-admin="{{ 'true' if user.is_admin else 'false' }}"
                     data-active="{{ 'true' if user.is_active else 'false' }}"
                     data-verified="{{ 'true' if user.email_verified else 'false' }}"
+                    data-permanent="{{ 'true' if user.can_permanent else 'false' }}"
                     data-quota-files="{{ user.quota_max_files if user.quota_max_files is not none else '' }}"
                     data-quota-bytes="{{ user.quota_max_bytes if user.quota_max_bytes is not none else '' }}"
                   >

@@ -59,20 +59,21 @@ def active_clause(cutoff: datetime | None = None):
 
 
 class ForeverNotAllowed(Exception):
-    """普通用户试图设置长期有效期。"""
+    """未获授权的用户试图设置长期有效期。"""
 
 
 async def resolve_expiry(
-    db: AsyncSession, expires_hours: int, *, is_admin: bool
+    db: AsyncSession, expires_hours: int, *, allow_forever: bool
 ) -> datetime | None:
     """把请求里的保留时长换算成到期的 UTC 时间；``None`` 表示长期有效。
 
-    普通用户的时长会被 ``quota.max_expire_days`` 钳制，管理员传入
-    :data:`FOREVER_HOURS` 则可设为长期有效——**这里必须拦普通用户**，
+    普通用户的时长会被 ``quota.max_expire_days`` 钳制；只有 ``allow_forever``
+    为真的用户（管理员，或被管理员勾选了 ``can_permanent`` 的账号）传入
+    :data:`FOREVER_HOURS` 才会设为长期有效——**这里必须拦下来**，
     不能只靠前端把选项藏起来。
     """
     if expires_hours <= FOREVER_HOURS:
-        if not is_admin:
+        if not allow_forever:
             raise ForeverNotAllowed
         return None
 

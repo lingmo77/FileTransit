@@ -283,6 +283,76 @@ async def test_admin_can_make_existing_file_forever(admin, api, user):
     assert (await admin.get(f"/d/{info['public_id']}")).status_code == 200
 
 
+async def _grant_forever(admin, user_id: int, allowed: bool = True):
+    response = await admin.patch(f"/admin/api/users/{user_id}", {"can_permanent": allowed})
+    assert response.status_code == 200, response.text
+    return response
+
+
+async def test_granted_user_can_save_forever(admin, api, user, new_client):
+    """需求：管理员指定某个用户后，这个普通用户也能永久保存文件。
+
+    权限是**按用户发放**的，不再是「只有管理员」——所以这里走的是普通用户
+    自己的会话 ``api``，全程没碰后台接口。
+    """
+    # 授权之前必须被拦（对照组，证明下面放行确实是授权带来的）
+    assert (await api.upload("before-grant.bin", b"a" * 16, expires_hours=0)).status_code == 400
+
+    await _grant_forever(admin, user["id"])
+
+    response = await api.upload("granted.bin", PAYLOAD, expires_hours=0)
+    assert response.status_code == 201, response.text
+    info = response.json()["file"]
+    assert info["expires_at"] is None
+    assert info["forever"] is True
+
+    # 长期有效的文件必须能出现在首页并被下载（NULL 参与比较恒为假，
+    # active_clause 漏写 IS NULL 就会两边都捞不到）
+    guest = await new_client()
+    assert "granted.bin" in (await guest.get("/")).text
+    download = await guest.get(f"/d/{info['public_id']}")
+    assert download.status_code == 200
+    assert download.content == PAYLOAD
+
+    # 修改路径同样放行：把已有文件改成长期有效
+    normal = await api.upload("promote-granted.bin", b"b" * 32)
+    patched = await api.patch(
+        f"/api/files/{normal.json()['file']['id']}", {"expires_hours": 0}
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["file"]["expires_at"] is None
+
+
+async def test_revoked_user_keeps_existing_forever_files(admin, api, user):
+    """收回权限后不能再设长期有效，但**已有的**长期有效文件不追溯删除。"""
+    await _grant_forever(admin, user["id"])
+    kept = (await api.upload("already-forever.bin", b"c" * 16, expires_hours=0)).json()["file"]
+    assert kept["expires_at"] is None
+
+    await _grant_forever(admin, user["id"], allowed=False)
+
+    # 新上传被拦
+    assert (await api.upload("after-revoke.bin", b"d" * 16, expires_hours=0)).status_code == 400
+    # 老文件原样保留，且仍在首页
+    assert (await api.get(f"/api/files/{kept['id']}")).json()["file"]["expires_at"] is None
+    assert "already-forever.bin" in (await api.get("/")).text
+
+
+async def test_dashboard_offers_forever_only_when_granted(admin, api, user):
+    """上传页的「长期有效」选项跟着授权走，授权前后同一个人看到的不一样。"""
+    before = await api.get("/dashboard")
+    assert before.status_code == 200
+    assert 'data-can-forever="false"' in before.text
+    assert "长期有效（永久保存）" not in before.text
+
+    await _grant_forever(admin, user["id"])
+
+    after = await api.get("/dashboard")
+    assert after.status_code == 200
+    assert 'data-can-forever="true"' in after.text
+    assert "长期有效（永久保存）" in after.text
+
+
 async def test_max_upload_mb_setting_takes_effect_without_restart(admin, api, user):
     """后台改「单文件上限」立刻生效——上传时实时读库，不是启动时读环境变量。
 

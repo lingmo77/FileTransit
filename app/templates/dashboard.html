@@ -62,7 +62,7 @@
       role="button"
       tabindex="0"
       data-max-expire-days="{{ max_expire_days }}"
-      data-is-admin="{{ 'true' if current_user and current_user.is_admin else 'false' }}"
+      data-can-forever="{{ 'true' if current_user and current_user.can_save_forever else 'false' }}"
       aria-label="上传文件：点击选择或拖拽文件到此处"
     >
       <div class="dz-icon">{{ icon('upload', 22) }}</div>
@@ -81,8 +81,8 @@
               <option value="{{ hours }}" {% if hours == 72 %}selected{% endif %}>{{ label }}</option>
             {% endif %}
           {% endfor %}
-          {% if current_user and current_user.is_admin %}
-            <option value="0">长期有效（仅管理员）</option>
+          {% if current_user and current_user.can_save_forever %}
+            <option value="0">长期有效（永久保存）</option>
           {% endif %}
         </select>
       </div>
@@ -147,5 +147,5 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="/static/js/upload.js?v=2"></script>
+  <script src="/static/js/upload.js?v=3"></script>
 {% endblock %}

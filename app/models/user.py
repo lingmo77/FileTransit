@@ -26,6 +26,8 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     #: 默认管理员首次登录后强制改密
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    #: 是否允许上传永久保存（长期有效）的文件；管理员不需要这个开关，天然允许
+    can_permanent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     #: NULL 表示使用站点默认配额
     quota_max_files: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -46,6 +48,16 @@ class User(Base):
     @property
     def display_name(self) -> str:
         return self.username
+
+    @property
+    def can_save_forever(self) -> bool:
+        """能否把文件设为长期有效（永久保存）。
+
+        管理员不用逐个授权，天然具备；普通用户看 ``can_permanent``。
+        判权限的地方一律走这里，别再去读 ``is_admin``——否则新增授权方式时
+        会漏掉某一处，前端放行了后端还拦着。
+        """
+        return self.is_admin or self.can_permanent
 
 
 class UserSession(Base):

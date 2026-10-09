@@ -64,6 +64,8 @@ class UserCreateIn(BaseModel):
     password: str = Field(max_length=128)
     is_admin: bool = False
     email_verified: bool = True
+    #: 允许该用户上传永久保存的文件
+    can_permanent: bool = False
 
 
 class UserUpdateIn(BaseModel):
@@ -72,6 +74,7 @@ class UserUpdateIn(BaseModel):
     is_active: bool | None = None
     is_admin: bool | None = None
     email_verified: bool | None = None
+    can_permanent: bool | None = None
     quota_max_files: int | None = Field(default=None, ge=-1, le=1_000_000)
     quota_max_bytes: int | None = Field(default=None, ge=-1)
 
@@ -85,6 +88,9 @@ def _serialize_user(user: User) -> dict[str, object]:
         "is_active": user.is_active,
         "email_verified": user.email_verified,
         "must_change_password": user.must_change_password,
+        "can_permanent": user.can_permanent,
+        # 派生值：管理员天然可永久保存，前端只读这一个字段即可
+        "can_save_forever": user.can_save_forever,
         "quota_max_files": user.quota_max_files,
         "quota_max_bytes": user.quota_max_bytes,
         "used_files": user.used_files,
@@ -147,6 +153,7 @@ async def create_user(
         password_hash=hash_password(payload.password),
         is_admin=payload.is_admin,
         email_verified=payload.email_verified,
+        can_permanent=payload.can_permanent,
         must_change_password=True,
     )
     db.add(user)
@@ -220,6 +227,12 @@ async def update_user(
     if data.get("email_verified") is not None:
         user.email_verified = bool(data["email_verified"])
         changes["email_verified"] = user.email_verified
+
+    if data.get("can_permanent") is not None:
+        # 只改开关本身：已经存成长期有效的文件不跟着回退，
+        # 那属于用户已有的数据，收回权限不应该顺手删掉。
+        user.can_permanent = bool(data["can_permanent"])
+        changes["can_permanent"] = user.can_permanent
 
     if "quota_max_files" in data:
         user.quota_max_files = data["quota_max_files"]

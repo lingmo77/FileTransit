@@ -10,7 +10,8 @@
   var expiresSelect = document.getElementById('expires_hours');
   var publicCheckbox = document.getElementById('is_public');
   var maxExpireDays = parseInt(dropzone.dataset.maxExpireDays || '30', 10);
-  var isAdmin = dropzone.dataset.isAdmin === 'true';
+  // 永久保存的权限由后台按用户发放；管理员天然具备
+  var canForever = dropzone.dataset.canForever === 'true';
   var active = 0;
   var uploadedSomething = false;
 
@@ -24,8 +25,8 @@
     [720, '30 天'],
   ];
 
-  // 0 是「长期有效」的哨兵值，只有管理员能选（后端也会再拦一次）
-  if (isAdmin) EXPIRY_OPTIONS.push([0, '长期有效']);
+  // 0 是「长期有效」的哨兵值，只有获得授权的用户能选（后端也会再拦一次）
+  if (canForever) EXPIRY_OPTIONS.push([0, '长期有效']);
 
   /* ---------------------------------------------------------- 选择文件 */
 
@@ -231,7 +232,7 @@
     var backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
 
-    // expires_at 为空即长期有效；只有管理员能重新选这个值
+    // expires_at 为空即长期有效；只有获得授权的用户能重新选这个值
     var isForever = !expiresIso;
 
     var options = EXPIRY_OPTIONS.filter(function (pair) {
@@ -246,7 +247,7 @@
       .join('');
 
     var currentText = isForever
-      ? '长期有效' + (isAdmin ? '' : '（由管理员设置）')
+      ? '长期有效' + (canForever ? '' : '（由管理员设置）')
       : FT.formatTime(expiresIso);
 
     backdrop.innerHTML =

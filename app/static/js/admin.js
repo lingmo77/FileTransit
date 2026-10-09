@@ -151,6 +151,8 @@
           '<span class="help">用户首次登录后会被要求修改密码</span></div>' +
           '<label class="checkbox"><input type="checkbox" id="nu-admin" />' +
           '<span>设为管理员</span></label>' +
+          '<label class="checkbox" style="margin-top:8px"><input type="checkbox" id="nu-permanent" />' +
+          '<span>允许永久保存</span></label>' +
           '<label class="checkbox" style="margin-top:8px"><input type="checkbox" id="nu-verified" checked />' +
           '<span>邮箱标记为已验证</span></label>',
       });
@@ -174,6 +176,7 @@
               email: email,
               password: password,
               is_admin: dialog.body.querySelector('#nu-admin').checked,
+              can_permanent: dialog.body.querySelector('#nu-permanent').checked,
               email_verified: dialog.body.querySelector('#nu-verified').checked,
             },
           });
@@ -209,6 +212,8 @@
           '<p class="tiny muted" style="margin: 0">上限填 <code>-1</code> 表示不限制。</p>' +
           '<label class="checkbox" style="margin-top:12px"><input type="checkbox" id="eu-admin" />' +
           '<span>管理员</span></label>' +
+          '<label class="checkbox" style="margin-top:8px"><input type="checkbox" id="eu-permanent" />' +
+          '<span>允许永久保存</span></label>' +
           '<label class="checkbox" style="margin-top:8px"><input type="checkbox" id="eu-active" />' +
           '<span>账号启用</span></label>' +
           '<label class="checkbox" style="margin-top:8px"><input type="checkbox" id="eu-verified" />' +
@@ -217,6 +222,7 @@
 
       fill('eu-email', button.getAttribute('data-email') || '');
       checked('eu-admin', button.getAttribute('data-admin') === 'true');
+      checked('eu-permanent', button.getAttribute('data-permanent') === 'true');
       checked('eu-active', button.getAttribute('data-active') === 'true');
       checked('eu-verified', button.getAttribute('data-verified') === 'true');
       fill('eu-files', button.getAttribute('data-quota-files'));
@@ -229,6 +235,7 @@
           is_admin: dialog.body.querySelector('#eu-admin').checked,
           is_active: dialog.body.querySelector('#eu-active').checked,
           email_verified: dialog.body.querySelector('#eu-verified').checked,
+          can_permanent: dialog.body.querySelector('#eu-permanent').checked,
         };
 
         var password = dialog.body.querySelector('#eu-password').value;

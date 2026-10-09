@@ -26,7 +26,7 @@ me_router = APIRouter(prefix="/api/me", tags=["me"])
 
 
 class FileUpdateIn(BaseModel):
-    #: ``0`` = 长期有效，仅管理员可用（见 :func:`files_service.resolve_expiry`）
+    #: ``0`` = 长期有效，仅管理员或被授权用户可用（见 :func:`files_service.resolve_expiry`）
     expires_hours: int | None = Field(default=None, ge=0, le=24 * 365)
     is_public: bool | None = None
 
@@ -54,10 +54,12 @@ async def _resolve_expiry(
 ) -> datetime | None:
     try:
         return await files_service.resolve_expiry(
-            db, expires_hours, is_admin=auth.user.is_admin
+            db, expires_hours, allow_forever=auth.user.can_save_forever
         )
     except files_service.ForeverNotAllowed:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "普通用户不能设置长期有效") from None
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "你还没有被授予永久保存的权限"
+        ) from None
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

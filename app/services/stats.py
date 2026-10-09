@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..models import ActivityLog, FileItem, User, utcnow
 from . import storage
@@ -143,6 +144,10 @@ async def overview(db: AsyncSession) -> dict[str, object]:
             .where(FileItem.is_deleted.is_(False))
             .order_by(FileItem.created_at.desc())
             .limit(8)
+            # 模板里要显示 item.owner.username，必须在这里预加载：
+            # 异步会话下访问未加载的关联是同步 IO，会抛 MissingGreenlet。
+            # 没有文件时循环体不执行，所以这个坑只在「有文件」的库上才暴露。
+            .options(selectinload(FileItem.owner))
         )
     ).scalars().all()
 
