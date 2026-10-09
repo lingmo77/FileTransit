@@ -8,6 +8,8 @@
   由 Starlette 的 ``FileResponse`` 处理并返回 ``206`` + ``Content-Range``；
 * 支持 ``HEAD``（下载器先探测大小）；
 * 二进制响应不做 gzip，避免 ``Content-Length`` 与实际字节数不一致；
+* ``ETag`` 必须是合法的 opaque-tag（见 ``_build_response``），否则下载器回传
+  ``If-Range`` 时对不上，Starlette 会退回 ``200`` 整包，分片连接被客户端掐断；
 * 每个请求独立打开文件句柄，不加任何进程内锁，连接数由反向代理与系统决定。
 """
 
@@ -127,8 +129,17 @@ async def _build_response(
         "Accept-Ranges": "bytes",
         # 文件内容不可变（重名会换 public_id），可以放心长缓存
         "Cache-Control": "public, max-age=31536000, immutable",
-        # expires_at 为 None（长期有效）时退化成一个固定串
-        "ETag": f'"{item.public_id}-{item.expires_at or "forever"}-{item.size}"',
+        # ETag 只能是 RFC 7232 的 opaque-tag：双引号内允许的字符集（etagc）
+        # 排除空格、双引号和逗号。这里只放 public_id 与 size，两者都只含
+        # [A-Za-z0-9_-] 和数字，天然合法；同一个 public_id 的内容永不改变，
+        # 改有效期/改文件名都不影响字节，所以不带 expires_at 也是正确的。
+        #
+        # 别把 expires_at 拼进来：datetime 的 str() 形如
+        # "2026-10-12 03:11:22.014865"，中间那个空格就是非法字符。下载器
+        # （IDM / 迅雷 / aria2）拿到非法 ETag 后回传的 If-Range 很可能对不上，
+        # 而 Starlette 的 FileResponse 只要 If-Range 匹配失败就会返回 200 整包
+        # 而不是 206——分片连接收到整包只能断开，表现为"多线程下载连不上第二条"。
+        "ETag": f'"{item.public_id}-{item.size}"',
     }
 
     background = None

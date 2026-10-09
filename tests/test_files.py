@@ -90,6 +90,67 @@ async def test_range_requests_enable_multithreaded_download(api, user):
     assert friendly.content == PAYLOAD[10:20]
 
 
+def _assert_valid_etag(etag: str) -> str:
+    """ETag 必须是 RFC 7232 的合法 opaque-tag。
+
+    ``etagc = %x21 / %x23-7E``——双引号之内不允许空格（``%x20``）、双引号本身
+    以及不可见字符。
+    """
+    assert etag.startswith('"') and etag.endswith('"'), etag
+    inner = etag[1:-1]
+    assert inner, "ETag 不能是空串"
+    for ch in inner:
+        assert ch != '"', f"ETag 里不能有裸双引号: {etag!r}"
+        assert 0x21 <= ord(ch) <= 0x7E, f"ETag 含非法字符 {ch!r}: {etag!r}"
+    return inner
+
+
+async def test_etag_is_valid_and_if_range_round_trips(api, user):
+    """回归：ETag 里曾经直接拼了 ``expires_at``，datetime 的 str() 带空格。
+
+    那个空格违反 RFC 7232，下载器回传的 ``If-Range`` 就对不上；Starlette 的
+    ``FileResponse`` 只要 ``If-Range`` 匹配失败就返回 ``200`` 整包而不是 ``206``，
+    分片连接收到整包只能断开——表现为「多线程下载只连得上一条」。
+    """
+    response = await api.upload("etag.bin", PAYLOAD)
+    info = response.json()["file"]
+    url = f"/d/{info['public_id']}"
+
+    head = await api.client.request("HEAD", url)
+    assert head.status_code == 200
+    etag = head.headers["etag"]
+    _assert_valid_etag(etag)
+
+    # 内容不变时 ETag 必须稳定（同一个 public_id 内容永不改变）
+    assert (await api.client.request("HEAD", url)).headers["etag"] == etag
+
+    # 原样回传必须仍然是 206：断点续传/多线程分片就靠这个
+    ranged = await api.get(url, headers={"Range": "bytes=100-199", "If-Range": etag})
+    assert ranged.status_code == 206, (ranged.status_code, ranged.headers)
+    assert ranged.content == PAYLOAD[100:200]
+
+    # 对不上的 If-Range 会被 Starlette 降级成 200 整包。
+    # 固化这个行为，好让以后有人再往 ETag 里塞会变的值时立刻挂测试。
+    stale = await api.get(url, headers={"Range": "bytes=100-199", "If-Range": '"stale"'})
+    assert stale.status_code == 200
+    assert stale.content == PAYLOAD
+
+
+async def test_forever_file_has_a_valid_etag(admin, api):
+    """长期有效的文件（``expires_at`` 为 NULL）ETag 同样要合法、且不含多余字段。"""
+    response = await admin.upload("forever-etag.bin", PAYLOAD, expires_hours=0)
+    assert response.status_code == 201, response.text
+    info = response.json()["file"]
+    assert info["expires_at"] is None
+
+    head = await api.client.request("HEAD", f"/d/{info['public_id']}")
+    assert head.status_code == 200
+    etag = head.headers["etag"]
+    _assert_valid_etag(etag)
+    # 有效期不再是 ETag 的组成部分：内容没变，ETag 就不该变
+    assert etag == f'"{info["public_id"]}-{len(PAYLOAD)}"'
+
+
 async def test_html_upload_is_forced_to_download(api, user):
     """避免上传的 HTML/SVG 在站点域下被渲染执行（存储型 XSS）。"""
     response = await api.upload("evil.html", b"<script>alert(1)</script>")
