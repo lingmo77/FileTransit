@@ -1122,7 +1122,8 @@ select {
 
 .upload-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* 第三列放取消按钮；文件名那列用 minmax(0, 1fr) 才能被压缩出省略号 */
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 6px 12px;
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -1137,6 +1138,26 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 状态里要放「45% · 3.4 MB/s · 剩余 6 分 12 秒」，窄屏上宁可截断也不能把卡片撑破 */
+.upload-item .status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 比通用的 36px 图标按钮小一号，免得抢了文件名的地方 */
+.upload-item .icon-btn {
+  width: 26px;
+  height: 26px;
+  margin: -3px -6px -3px 0;
+}
+
+.upload-item .icon-btn svg {
+  width: 14px;
+  height: 14px;
 }
 
 .progress {
@@ -1162,6 +1183,15 @@ select {
 
 .upload-item.failed .progress > i {
   background: var(--danger);
+}
+
+/* 用户自己取消的，不是错误，用中性色，别搞得像出了故障 */
+.upload-item.cancelled .progress > i {
+  background: var(--muted);
+}
+
+.upload-item.cancelled .status {
+  color: var(--muted);
 }
 
 /* ---------------------------------------------------------------- 提示条 */
@@ -1529,6 +1559,25 @@ select {
     opacity: 1;
     transform: none;
   }
+}
+
+/* 替代 window.confirm 的确认框：比普通模态框窄一些，正文可能带文件名，
+   用 break-word 兜住超长文件名不撑破卡片 */
+.confirm-modal {
+  max-width: 420px;
+}
+
+.confirm-modal .card-body {
+  padding-top: 4px;
+  padding-bottom: 18px;
+}
+
+.confirm-message {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: var(--text-soft);
+  overflow-wrap: break-word;
 }
 
 /* ---------------------------------------------------------------- 页脚 */

@@ -268,12 +268,11 @@
 
     'delete-user': async function (button) {
       var username = button.getAttribute('data-username') || '';
-      if (
-        !window.confirm(
-          '确定删除用户「' + username + '」？\n该用户的所有文件也会被一并删除，且不可恢复。'
-        )
-      )
-        return;
+      var confirmed = await FT.confirm(
+        '确定删除用户「' + username + '」？该用户的所有文件也会被一并删除，且不可恢复。',
+        { title: '删除用户', okText: '删除' }
+      );
+      if (!confirmed) return;
 
       var restore = FT.busy(button, true);
       try {
@@ -360,7 +359,11 @@
 
     'delete-file': async function (button) {
       var name = button.getAttribute('data-name') || '';
-      if (!window.confirm('确定删除文件「' + name + '」？磁盘上的文件会被立即清除。')) return;
+      var confirmed = await FT.confirm(
+        '确定删除文件「' + name + '」？磁盘上的文件会被立即清除。',
+        { title: '删除文件', okText: '删除' }
+      );
+      if (!confirmed) return;
 
       var restore = FT.busy(button, true);
       try {
@@ -377,7 +380,7 @@
       }
     },
 
-    'purge-logs': function (button) {
+    'purge-logs': async function (button) {
       var form = document.getElementById('log-filter-form');
       var before = (document.getElementById('purge-before') || {}).value || '';
       var after = (document.getElementById('purge-after') || {}).value || '';
@@ -392,7 +395,11 @@
         (before ? '在 ' + before + ' 之前' : '') +
         (after ? (before ? '、' : '') + '在 ' + after + ' 之后' : '') +
         (scopeAction ? '、类型为「' + scopeAction + '」' : '');
-      if (!window.confirm('确定清空' + description + '的日志？此操作不可恢复。')) return;
+      var confirmed = await FT.confirm('确定清空' + description + '的日志？此操作不可恢复。', {
+        title: '清空日志',
+        okText: '清空',
+      });
+      if (!confirmed) return;
 
       var body = {
         before: before,

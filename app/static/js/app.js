@@ -100,6 +100,75 @@
       }, life);
     },
 
+    /**
+     * 站内确认弹窗，替代 ``window.confirm``。
+     *
+     * 原生 confirm 是浏览器**进程级**对话框：样式完全不可控，移动端上会变成
+     * 一条系统提示，而且它是同步阻塞的——弹着的时候整个页面都不刷新（上传
+     * 进度条也是）。这里用站内模态框换掉，外观和主题一致，也不阻塞页面。
+     *
+     * @param {string} message 正文，按纯文本插入（文件名可能带尖括号）
+     * @param {{title?: string, okText?: string, danger?: boolean}} [options]
+     *        ``danger`` 默认为 true：本站的确认几乎都是删除类操作，
+     *        默认把焦点放在「取消」上，免得顺手一个回车就把东西删了。
+     * @returns {Promise<boolean>} 确定 → true；取消 / Esc / 点遮罩 → false
+     */
+    confirm: function (message, options) {
+      var opts = options || {};
+
+      return new Promise(function (resolve) {
+        var backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML =
+          '<div class="modal card confirm-modal" role="dialog" aria-modal="true">' +
+          '<div class="card-head"><h2></h2></div>' +
+          '<div class="card-body"><p class="confirm-message"></p></div>' +
+          '<div class="card-foot row" style="justify-content: flex-end">' +
+          '<button type="button" class="btn" data-cancel>取消</button>' +
+          '<button type="button" class="btn" data-ok></button>' +
+          '</div></div>';
+
+        // 标题和正文都走 textContent：调用方会把用户起的文件名拼进来
+        backdrop.querySelector('.card-head h2').textContent = opts.title || '请确认';
+        backdrop.querySelector('.confirm-message').textContent = message;
+
+        var okButton = backdrop.querySelector('[data-ok]');
+        okButton.textContent = opts.okText || '确定';
+        if (opts.danger !== false) okButton.classList.add('btn-danger');
+
+        var cancelButton = backdrop.querySelector('[data-cancel]');
+
+        document.body.appendChild(backdrop);
+
+        var settled = false;
+        function finish(result) {
+          if (settled) return;
+          settled = true;
+          document.removeEventListener('keydown', onKey);
+          backdrop.remove();
+          resolve(result);
+        }
+
+        function onKey(event) {
+          if (event.key === 'Escape') finish(false);
+        }
+
+        document.addEventListener('keydown', onKey);
+        cancelButton.addEventListener('click', function () {
+          finish(false);
+        });
+        okButton.addEventListener('click', function () {
+          finish(true);
+        });
+        backdrop.addEventListener('click', function (event) {
+          if (event.target === backdrop) finish(false);
+        });
+
+        // 按 Esc 或点遮罩都算取消，所以取消键天然就是「安全」的那一个
+        (opts.danger === false ? okButton : cancelButton).focus();
+      });
+    },
+
     /** 按钮忙碌态：返回一个恢复函数 */
     busy: function (button, busy) {
       if (!button) return function () {};

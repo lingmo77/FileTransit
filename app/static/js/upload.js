@@ -80,33 +80,91 @@
 
   /* ---------------------------------------------------------- 队列渲染 */
 
+  var DISMISS_ICON =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+
+  /** 把秒数写成人话：45 秒 / 6 分 12 秒 / 1 小时 5 分 */
+  function formatDuration(seconds) {
+    if (!isFinite(seconds) || seconds <= 0) return '';
+    var total = Math.round(seconds);
+    if (total < 60) return total + ' 秒';
+    var minutes = Math.floor(total / 60);
+    var rest = total % 60;
+    if (minutes < 60) return rest ? minutes + ' 分 ' + rest + ' 秒' : minutes + ' 分';
+    return Math.floor(minutes / 60) + ' 小时 ' + (minutes % 60) + ' 分';
+  }
+
   function createRow(file) {
     var el = document.createElement('div');
     el.className = 'upload-item';
     el.innerHTML =
       '<div class="name"></div>' +
       '<div class="tiny muted status">等待中</div>' +
+      '<button type="button" class="icon-btn upload-dismiss" title="取消上传" ' +
+      'aria-label="取消上传">' +
+      DISMISS_ICON +
+      '</button>' +
       '<div class="progress"><i></i></div>';
 
     el.querySelector('.name').textContent = file.name;
     var status = el.querySelector('.status');
     var bar = el.querySelector('.progress > i');
+    var dismiss = el.querySelector('.upload-dismiss');
+
+    function paint(text) {
+      status.textContent = text;
+    }
+
+    /** 收尾后按钮从「取消上传」变成「从列表移除」 */
+    function settle(className, text) {
+      el.classList.add(className);
+      paint(text);
+      dismiss.title = '从列表移除';
+      dismiss.setAttribute('aria-label', '从列表移除');
+    }
 
     return {
       el: el,
-      setProgress: function (ratio) {
+      dismiss: dismiss,
+
+      /** 上传中：百分比 + 实时速度 + 预计剩余时间 */
+      progress: function (ratio, speed, loaded, total) {
+        var percent = Math.round(ratio * 100) + '%';
         bar.style.width = Math.round(ratio * 100) + '%';
-        status.textContent = Math.round(ratio * 100) + '% · ' + FT.formatSize(file.size);
+
+        if (total > 0 && loaded >= total) {
+          // 字节已经发完，剩下的是服务端落盘 + 校验，这段时间没有进度事件，
+          // 显示速度只会停在最后一个采样值，看着像卡住了
+          paint(percent + ' · 服务器处理中…');
+          return;
+        }
+
+        var text = percent;
+        if (speed > 0) {
+          text += ' · ' + FT.formatSize(speed) + '/s';
+          var left = (total - loaded) / speed;
+          var human = formatDuration(left);
+          if (human) text += ' · 剩余 ' + human;
+        }
+        paint(text);
       },
+
+      /** 超过 2 秒没有收到进度事件：把速度归零，别让读数停在一个骗人的值上 */
+      stalled: function (percent) {
+        paint(percent + ' · 已停顿…');
+      },
+
       done: function () {
-        el.classList.add('done');
         bar.style.width = '100%';
-        status.textContent = '已完成';
+        settle('done', '已完成');
       },
       fail: function (message) {
-        el.classList.add('failed');
-        status.textContent = message || '失败';
+        settle('failed', message || '失败');
         status.style.color = 'var(--danger)';
+      },
+      cancelled: function () {
+        settle('cancelled', '已取消');
       },
     };
   }
@@ -131,11 +189,69 @@
     xhr.open('POST', '/api/files', true);
     xhr.setRequestHeader('X-CSRF-Token', FT.csrf());
 
+    // 速度表。浏览器的进度事件既密集又不均匀，直接拿两次事件的差算瞬时值会
+    // 跳得没法看，所以每 500ms 采一次样，再做指数平滑。
+    var sample = { at: 0, loaded: 0 };
+    var meter = { at: 0, speed: 0 };
+    var lastLoaded = 0;
+    var lastTotal = file.size || 0;
+    var settled = false;
+    var ticker = null;
+
+    function stopTicker() {
+      if (ticker) {
+        clearInterval(ticker);
+        ticker = null;
+      }
+    }
+
     xhr.upload.addEventListener('progress', function (event) {
-      if (event.lengthComputable) row.setProgress(event.loaded / event.total);
+      if (!event.lengthComputable) return;
+
+      var now = Date.now();
+      lastLoaded = event.loaded;
+      lastTotal = event.total;
+      meter.at = now;
+
+      if (!sample.at) {
+        sample.at = now;
+        sample.loaded = event.loaded;
+      }
+      var elapsed = now - sample.at;
+      if (elapsed >= 500) {
+        var instant = (event.loaded - sample.loaded) / (elapsed / 1000);
+        meter.speed = meter.speed > 0 ? meter.speed * 0.7 + instant * 0.3 : instant;
+        sample.at = now;
+        sample.loaded = event.loaded;
+      }
+
+      row.progress(event.loaded / event.total, meter.speed, event.loaded, event.total);
+    });
+
+    // 卡住的时候不再有进度事件，速度读数会永远停在最后一个采样值上。
+    // 这里兜一个定时器：2 秒没动静就把速度归零，并明说"已停顿"。
+    ticker = setInterval(function () {
+      if (settled || !meter.at) return;
+      if (Date.now() - meter.at < 2000) return;
+      if (lastTotal > 0 && lastLoaded >= lastTotal) return; // 已在服务端处理阶段
+      row.stalled(lastTotal ? lastLoaded / lastTotal : 0);
+    }, 1000);
+
+    // 上传中点击＝取消；已结束后点击＝把这一行从列表里去掉
+    row.dismiss.addEventListener('click', function () {
+      if (settled) {
+        row.el.remove();
+        // 全清空后别留一个空盒子占着地方
+        if (!queue.children.length) queue.hidden = true;
+        return;
+      }
+      xhr.abort(); // 收尾统一走 abort 事件
     });
 
     xhr.addEventListener('load', function () {
+      settled = true;
+      stopTicker();
+
       var data = null;
       try {
         data = JSON.parse(xhr.responseText);
@@ -159,13 +275,18 @@
     });
 
     xhr.addEventListener('error', function () {
+      settled = true;
+      stopTicker();
       row.fail('网络中断');
       FT.toast('「' + file.name + '」上传中断，请重试', 'error');
       finish();
     });
 
     xhr.addEventListener('abort', function () {
-      row.fail('已取消');
+      settled = true;
+      stopTicker();
+      row.cancelled();
+      FT.toast('已取消上传「' + file.name + '」', 'info');
       finish();
     });
 
@@ -190,7 +311,11 @@
     if (!button) return;
 
     var name = button.getAttribute('data-name') || '该文件';
-    if (!window.confirm('确定删除「' + name + '」吗？此操作不可恢复。')) return;
+    var confirmed = await FT.confirm('确定删除「' + name + '」吗？此操作不可恢复。', {
+      title: '删除文件',
+      okText: '删除',
+    });
+    if (!confirmed) return;
 
     var restore = FT.busy(button, true);
     try {
