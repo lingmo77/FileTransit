@@ -233,6 +233,28 @@
     Array.prototype.forEach.call(fileList, uploadOne);
   }
 
+  /* 列表被前端摘掉一张卡片之后，标题里的计数和空状态得当场跟着变。
+     不能只靠 refresh() 那次整页刷新兜底：它要等上传队列空了才兑现，队列里只要
+     还挂着东西（比如卡住没结束的那次上传），它就永远排不上队，计数会一直停在
+     旧值上。这里的更新和模板渲染的结果是一致的：两个块都渲染、只切显隐。
+     页边界的情况（删掉第 2 页最后一张卡片、第 1 页还有文件）不动空状态——
+     总数为 0 才说明是真空了，这时候说「还没有上传过文件」才是真话。 */
+  function syncListAfterRemoval() {
+    var grid = document.getElementById('file-grid');
+    var empty = document.getElementById('file-grid-empty');
+    var count = document.getElementById('share-count');
+    if (!grid || !count) return;
+
+    var total = Math.max(0, parseInt(count.dataset.total || '0', 10) - 1);
+    count.dataset.total = String(total);
+    count.textContent = '（' + total + '）';
+
+    if (total === 0) {
+      grid.hidden = true;
+      if (empty) empty.hidden = false;
+    }
+  }
+
   function uploadOne(file) {
     var row = createRow(file);
     queue.appendChild(row.el);
@@ -263,13 +285,20 @@
       row.begin();
       if (!resume) active += 1;
 
-      var form = new FormData();
-      form.append('file', file);
-      form.append('expires_hours', expiresSelect.value);
-      form.append('is_public', publicCheckbox.checked ? 'true' : 'false');
+      var form;
+      try {
+        form = new FormData();
+        form.append('file', file);
+        form.append('expires_hours', expiresSelect.value);
+        form.append('is_public', publicCheckbox.checked ? 'true' : 'false');
 
-      xhr.open('POST', '/api/files', true);
-      xhr.setRequestHeader('X-CSRF-Token', FT.csrf());
+        xhr.open('POST', '/api/files', true);
+        xhr.setRequestHeader('X-CSRF-Token', FT.csrf());
+      } catch (error) {
+        // 选中的文件读不出来、FormData 都拼不起来：这一趟压根没发出去
+        gaveUp(error);
+        return;
+      }
 
       // 速度表。浏览器的进度事件既密集又不均匀，直接拿两次事件的差算瞬时值会
       // 跳得没法看，所以每 500ms 采一次样，再做指数平滑。
@@ -289,6 +318,16 @@
         if (current === state) current = null;
         active -= 1;
         finish();
+      }
+
+      /** 请求没起来就失败时的收尾。**必须**把这一趟的计数还回去：active 一旦
+          多出来一个，之后所有「等队列空了再刷新」的刷新就全排不上队，页面
+          看起来再也不刷新了（计数、配额都会停在旧值上）。 */
+      function gaveUp(error) {
+        if (window.console && console.error) console.error(error);
+        row.fail('无法读取该文件，请重新选择');
+        FT.toast('「' + file.name + '」无法开始上传', 'error');
+        end();
       }
 
       xhr.upload.addEventListener('progress', function (event) {
@@ -362,7 +401,11 @@
         end();
       });
 
-      xhr.send(form);
+      try {
+        xhr.send(form);
+      } catch (error) {
+        gaveUp(error);
+      }
     }
 
     // 上传中点击＝取消这次上传；已结束点击＝把这一行从列表里去掉
@@ -417,6 +460,7 @@
         card.style.transform = 'scale(.96)';
         setTimeout(function () {
           card.remove();
+          syncListAfterRemoval();
         }, 200);
       }
       FT.toast('文件已删除', 'success');

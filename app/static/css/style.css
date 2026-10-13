@@ -778,6 +778,12 @@ select {
   gap: 14px;
 }
 
+/* .file-grid 是 display:grid，比 UA 的 [hidden]{display:none} 优先级高。
+   删掉最后一个文件后要靠 hidden 把它收起来，所以得显式写这条。 */
+.file-grid[hidden] {
+  display: none;
+}
+
 .file-card {
   position: relative;
   display: flex;

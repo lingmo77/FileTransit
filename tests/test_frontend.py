@@ -114,3 +114,64 @@ async def test_every_referenced_static_asset_resolves(api, user):
     for url in urls:
         # 带 ?v= 的查询串不影响 StaticFiles 按路径匹配
         assert (await api.get(url)).status_code == 200, f"取不到 {url}"
+
+
+async def test_share_count_and_empty_state_are_rendered_together(api, user):
+    """列表和空状态两个块都要在首屏渲染出来（靠 hidden 切显隐）。
+
+    删掉卡片后要靠前端把计数和空状态当场改对——如果空状态块只在 ``total == 0``
+    时才渲染，前端就没东西可显示，只能干等那次「等上传跑完再刷」的整页刷新。
+    而那次刷新在队列里有卡住的上传时永远不来，计数会一直停在旧值上。
+    """
+    empty_page = await api.get("/dashboard")
+    assert 'id="file-grid" hidden' in empty_page.text, "没文件时列表还占着地方"
+    assert 'id="file-grid-empty" hidden' not in empty_page.text, "没文件时空状态被藏了"
+
+    await api.upload("only.bin", b"x" * 32)
+    page = await api.get("/dashboard")
+    assert 'id="file-grid" hidden' not in page.text, "有文件时列表被藏了"
+    assert 'id="file-grid-empty" hidden' in page.text, "有文件时空状态还露着"
+
+    # 计数块带 data-total：前端只减自己那一份，不用去猜总数
+    match = re.search(r'id="share-count"[^>]*data-total="(\d+)"', page.text)
+    assert match, "计数块没有 data-total，前端只能去解析文本"
+    assert match.group(1) == "1"
+
+
+def test_delete_syncs_the_share_count_in_the_dom():
+    """删除卡片后要自己把计数和空状态改对，不能只依赖那次延后的整页刷新。"""
+    code = (STATIC / "js" / "upload.js").read_text(encoding="utf-8")
+
+    assert "function syncListAfterRemoval()" in code, "没有就地更新列表的收尾函数"
+    # 必须在真的摘掉卡片那一步调用（跟着淡出动画一起）
+    assert re.search(r"card\.remove\(\);\s*\n\s*syncListAfterRemoval\(\);", code), (
+        "摘掉卡片后没有同步计数"
+    )
+    assert "count.dataset.total" in code and "count.textContent" in code
+    assert "grid.hidden = true" in code and "empty.hidden = false" in code
+
+
+def test_hidden_file_grid_is_really_hidden():
+    """``.file-grid`` 是 display:grid，比 UA 的 ``[hidden]{display:none}`` 优先级高。
+
+    这条已经坑过两次（重试按钮、现在的列表），所以对**下发出去的** CSS 断言。
+    """
+    css = (STATIC / "css" / "style.css").read_text(encoding="utf-8")
+    assert re.search(r"\.file-grid\[hidden\]\s*\{[^}]*display:\s*none", css), (
+        "缺少让 file-grid 真正隐藏的 CSS"
+    )
+
+
+def test_upload_attempt_always_returns_its_slot():
+    """请求没起来就失败时也要把 ``active`` 还回去。
+
+    ``active`` 一旦多出来一个，「等队列空了再刷新」的刷新就永远排不上队——
+    整页刷新从此不再发生（计数、配额、列表全停在旧值上）。
+    """
+    code = _code_lines((STATIC / "js" / "upload.js").read_text(encoding="utf-8"))
+
+    assert code.count("active += 1") == 1, "计数点应该只有一个"
+    assert code.count("active -= 1") == 1, "归还点应该只有一个"
+    assert "function gaveUp(" in code, "缺少「没发出去也要收尾」的兜底"
+    # 拼 FormData / open 和 send 两处都可能抛，都得兜住
+    assert code.count("gaveUp(error);") == 2, "抛错路径没有全部兜住"

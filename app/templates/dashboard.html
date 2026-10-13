@@ -102,7 +102,9 @@
   <div class="spread" style="margin-bottom: 12px">
     <h2 style="margin: 0; font-size: 1.05rem">
       我的分享
-      <span class="muted small" style="font-weight: 400">（{{ result.total }}）</span>
+      <span class="muted small" id="share-count" data-total="{{ result.total }}" style="font-weight: 400"
+        >（{{ result.total }}）</span
+      >
     </h2>
     <form method="get" action="/dashboard" class="row" style="gap: 8px">
       <input
@@ -123,29 +125,30 @@
     </form>
   </div>
 
-  {% if result.items %}
-    <div class="file-grid" id="file-grid">
-      {% for item in result.items %}
-        {{ file_card(item, manage=True) }}
-      {% endfor %}
-    </div>
-    {{ pager(result, '/dashboard', {'q': q, 'kind': kind}) }}
-  {% else %}
-    <div class="card empty" id="file-grid-empty">
-      <div class="icon">{{ icon('inbox', 26) }}</div>
-      {% if q or kind %}
-        <p>没有匹配的文件</p>
-        <a class="btn btn-sm" href="/dashboard">清除筛选</a>
-      {% else %}
-        <p>还没有上传过文件</p>
-        <button type="button" class="btn btn-primary btn-sm" id="pick-files-empty">
-          上传第一个文件
-        </button>
-      {% endif %}
-    </div>
-  {% endif %}
+  {# 卡片列表和空状态两个都渲染、只切显隐：前端删掉卡片时要马上把计数和空状态
+     改对，不能干等那次「等上传跑完再刷」的整页刷新——队列里只要还挂着东西
+     （比如卡住的上传），那次刷新就一直排不上队，计数会一直停在旧值上。 #}
+  <div class="file-grid" id="file-grid" {% if not result.items %}hidden{% endif %}>
+    {% for item in result.items %}
+      {{ file_card(item, manage=True) }}
+    {% endfor %}
+  </div>
+  {{ pager(result, '/dashboard', {'q': q, 'kind': kind}) }}
+
+  <div class="card empty" id="file-grid-empty" {% if result.items %}hidden{% endif %}>
+    <div class="icon">{{ icon('inbox', 26) }}</div>
+    {% if q or kind %}
+      <p>没有匹配的文件</p>
+      <a class="btn btn-sm" href="/dashboard">清除筛选</a>
+    {% else %}
+      <p>还没有上传过文件</p>
+      <button type="button" class="btn btn-primary btn-sm" id="pick-files-empty">
+        上传第一个文件
+      </button>
+    {% endif %}
+  </div>
 {% endblock %}
 
 {% block scripts %}
-  <script src="/static/js/upload.js?v=5"></script>
+  <script src="/static/js/upload.js?v=6"></script>
 {% endblock %}
