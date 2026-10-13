@@ -255,6 +255,43 @@
     }
   }
 
+  /* 顶部那两张配额卡（已用文件数 / 已用空间）和标题计数一样，数字只由服务端
+     渲染。删掉文件后不自己改，队列里只要卡着一次上传，那次延后的整页刷新就
+     永远排不上队，数字会一直停在旧值上——和计数是同一个坑。
+
+     卡片上带 data-used / data-max，前端只减自己这一份，不去猜。max 为 -1 表示
+     无限制（后端 quota 的哨兵值），此时进度条宽度和模板一样恒为 0。 */
+  function syncQuotaAfterRemoval(size) {
+    bumpStat('stat-files', 'stat-files-used', -1, false, function (used) {
+      return String(used);
+    });
+    bumpStat('stat-bytes', 'stat-bytes-used', -(size || 0), true, function (used) {
+      return FT.formatSize(used);
+    });
+  }
+
+  function bumpStat(cardId, valueId, delta, warnable, format) {
+    var card = document.getElementById(cardId);
+    if (!card) return;
+
+    var used = Math.max(0, (parseInt(card.dataset.used, 10) || 0) + delta);
+    card.dataset.used = String(used);
+
+    var value = document.getElementById(valueId);
+    if (value) value.textContent = format(used);
+
+    var meter = card.querySelector('.meter');
+    if (!meter) return;
+    var max = parseInt(card.dataset.max, 10);
+    // 属性缺失（NaN）按无限制处理，比当成 0 容量安全
+    var limited = !isNaN(max) && max >= 0;
+    var ratio = limited ? Math.min((used * 100) / (max || 1), 100) : 0;
+    var bar = meter.querySelector('i');
+    if (bar) bar.style.width = ratio + '%';
+    // 「快满了」的红条只有空间卡有（和模板一致）
+    if (warnable) meter.classList.toggle('warn', limited && ratio > 85);
+  }
+
   function uploadOne(file) {
     var row = createRow(file);
     queue.appendChild(row.el);
@@ -442,6 +479,8 @@
     if (!button) return;
 
     var name = button.getAttribute('data-name') || '该文件';
+    // 卡片摘掉之后按钮就读不到了，先把大小拿在手里（配额卡要按它减）
+    var size = parseInt(button.getAttribute('data-size'), 10) || 0;
     var confirmed = await FT.confirm('确定删除「' + name + '」吗？此操作不可恢复。', {
       title: '删除文件',
       okText: '删除',
@@ -461,6 +500,7 @@
         setTimeout(function () {
           card.remove();
           syncListAfterRemoval();
+          syncQuotaAfterRemoval(size);
         }, 200);
       }
       FT.toast('文件已删除', 'success');

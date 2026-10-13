@@ -17,12 +17,14 @@
     </div>
   </div>
 
-  <!-- 配额 -->
+  <!-- 配额。data-used / data-max 是给前端用的：删掉文件后这张卡得当场跟着变，
+       不能只等那次「等上传跑完再刷」的整页刷新（队列里卡着上传时它永远不来）。
+       max 用后端 quota 的哨兵值 -1 表示无限制。 -->
   <div class="stat-grid" style="margin-bottom: 20px">
-    <div class="stat">
+    <div class="stat" id="stat-files" data-used="{{ quota.used_files }}" data-max="{{ -1 if quota.unlimited_files else quota.max_files }}">
       <div class="label">已用文件数</div>
       <div class="value">
-        {{ quota.used_files }}
+        <span id="stat-files-used">{{ quota.used_files }}</span>
         <span class="muted" style="font-size: 0.9rem; font-weight: 400">
           / {{ '∞' if quota.unlimited_files else quota.max_files }}
         </span>
@@ -34,9 +36,9 @@
       </div>
     </div>
 
-    <div class="stat">
+    <div class="stat" id="stat-bytes" data-used="{{ quota.used_bytes }}" data-max="{{ -1 if quota.unlimited_bytes else quota.max_bytes }}">
       <div class="label">已用空间</div>
-      <div class="value">{{ quota.used_bytes | human_size }}</div>
+      <div class="value" id="stat-bytes-used">{{ quota.used_bytes | human_size }}</div>
       <div class="meter {% if not quota.unlimited_bytes and quota.used_bytes * 100 / (quota.max_bytes or 1) > 85 %}warn{% endif %}" style="margin-top: 10px">
         <i
           style="width: {{ 0 if quota.unlimited_bytes else [(quota.used_bytes * 100 / (quota.max_bytes or 1)), 100] | min }}%"
@@ -150,5 +152,5 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="/static/js/upload.js?v=6"></script>
+  <script src="/static/js/upload.js?v=7"></script>
 {% endblock %}
