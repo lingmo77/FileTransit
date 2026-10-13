@@ -49,7 +49,7 @@
 
     <div class="stat">
       <div class="label">单文件上限</div>
-      <div class="value">{{ max_upload_mb }} <span style="font-size: 0.9rem; font-weight: 400">MB</span></div>
+      <div class="value">{{ max_upload_bytes | human_size }}</div>
       <div class="hint">由管理员在后台配置</div>
     </div>
   </div>
@@ -67,7 +67,7 @@
     >
       <div class="dz-icon">{{ icon('upload', 22) }}</div>
       <div class="dz-title">拖拽文件到此处，或点击选择</div>
-      <div class="small muted">支持多选 · 单个文件最大 {{ max_upload_mb }} MB</div>
+      <div class="small muted">支持多选 · 单个文件最大 {{ max_upload_bytes | human_size }}</div>
     </div>
     <input type="file" id="file-input" multiple hidden />
 
@@ -147,5 +147,5 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="/static/js/upload.js?v=4"></script>
+  <script src="/static/js/upload.js?v=5"></script>
 {% endblock %}

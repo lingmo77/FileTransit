@@ -58,6 +58,51 @@ async def test_upload_script_ships_cancel_and_speed(new_client):
     assert "upload-dismiss" in script, "取消按钮没有绑定到上传行上"
 
 
+def test_upload_queue_has_exactly_one_reload_exit():
+    """队列页只留一个刷新出口，而且它必须等上传跑完。
+
+    回归点：删除/修改文件后直接 ``location.reload()``，浏览器会把在途的
+    XHR 全部 abort——正在传的那几个当场变成「已取消」，看起来像是用户自己
+    的删除操作把上传弄没了。所以这些地方一律登记到 ``refresh()``，
+    由它等队列空了再刷。
+    """
+    code = _code_lines((STATIC / "js" / "upload.js").read_text(encoding="utf-8"))
+
+    assert code.count("window.location.reload()") == 1, "队列页出现了第二个刷新出口"
+    assert "if (reload.timer || active > 0) return;" in code, "刷新前没有「还有上传在跑」的把关"
+    # 删除 / 修改文件都得走 refresh，不许自己动手 reload
+    assert "refresh(900)" in code, "删除文件后没有走 refresh"
+    assert "refresh(700)" in code, "修改文件后没有走 refresh"
+
+
+def test_upload_queue_offers_a_retry():
+    """取消 / 失败 / 卡死之后都得能重来，而不是只能把这一行删掉。"""
+    code = _code_lines((STATIC / "js" / "upload.js").read_text(encoding="utf-8"))
+
+    assert "upload-retry" in code, "队列里没有重试按钮"
+    assert "row.retry.addEventListener('click', attempt)" in code, "重试按钮没接上重发"
+    assert "重新上传" in code, "重试按钮没有可读的名字"
+    # 卡死时要把它露出来，否则「已停顿」就成了死路
+    assert "retry.hidden = false" in code, "卡死/取消/失败时没有露出重试按钮"
+
+
+async def test_retry_button_can_actually_hide(new_client):
+    """重试按钮的「藏起来」得真的藏得住。
+
+    ``.icon-btn`` 是 ``display: grid``，优先级压过浏览器默认的
+    ``[hidden] { display: none }``——少了那条覆盖规则，不需要重试的时候
+    按钮也会一直挂在那里。
+    """
+    guest = await new_client()
+    css = (await guest.get("/static/css/style.css")).text
+
+    assert re.search(
+        r"\.upload-item \.icon-btn\[hidden\]\s*\{[^}]*display:\s*none", css
+    ), "缺少让重试按钮真正隐藏的 CSS"
+    # 两个按钮成组放在最后一列，藏起一个才不会在网格里留出一道空列
+    assert ".upload-actions" in css, "取消/重试按钮没有成组"
+
+
 async def test_every_referenced_static_asset_resolves(api, user):
     """页面上引用的每个 ``/static/...`` 都要真的取得到（改名/改路径后立刻发现）。"""
     page = await api.get("/dashboard")

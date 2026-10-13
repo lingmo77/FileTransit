@@ -201,7 +201,7 @@ async def dashboard(
         q=q,
         kind=kind,
         max_expire_days=cfg["max_expire_days"],
-        max_upload_mb=cfg["max_upload_mb"],
+        max_upload_bytes=cfg["max_upload_bytes"],
     )
     return templates.TemplateResponse(request, "dashboard.html", context)
 

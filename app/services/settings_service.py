@@ -187,6 +187,9 @@ async def template_settings(db: AsyncSession) -> dict[str, Any]:
         "default_max_files": _i("quota.default_max_files", 10),
         "default_max_bytes": _i("quota.default_max_bytes", 10 * GB),
         "max_upload_mb": _i("quota.max_upload_mb", env_settings.max_upload_mb),
+        # 对外展示一律按这个来：站内所有容量都用 human_size 走同一套格式，
+        # 20 GB 就显示成 "20.00 GB"，不会被写成 20480 MB
+        "max_upload_bytes": _i("quota.max_upload_mb", env_settings.max_upload_mb) * 1024 * 1024,
         "smtp_configured": bool(host and sender),
     }
 

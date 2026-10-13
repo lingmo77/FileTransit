@@ -1122,7 +1122,7 @@ select {
 
 .upload-item {
   display: grid;
-  /* 第三列放取消按钮；文件名那列用 minmax(0, 1fr) 才能被压缩出省略号 */
+  /* 第三列放操作按钮；文件名那列用 minmax(0, 1fr) 才能被压缩出省略号 */
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 6px 12px;
   padding: 12px 14px;
@@ -1148,11 +1148,26 @@ select {
   white-space: nowrap;
 }
 
+/* 「重试 + 取消」成组放进最后一列：重试按钮藏起来时，也不会在网格里
+   留下一个空列，白白多出一道 12px 的列间距 */
+.upload-item .upload-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: -3px -6px -3px 0;
+}
+
 /* 比通用的 36px 图标按钮小一号，免得抢了文件名的地方 */
 .upload-item .icon-btn {
   width: 26px;
   height: 26px;
-  margin: -3px -6px -3px 0;
+  margin: 0;
+}
+
+/* .icon-btn 是 display:grid，比 UA 的 [hidden]{display:none} 优先级高，
+   不补这一条的话「藏起来」的重试按钮照样显示 */
+.upload-item .icon-btn[hidden] {
+  display: none;
 }
 
 .upload-item .icon-btn svg {
@@ -1183,6 +1198,11 @@ select {
 
 .upload-item.failed .progress > i {
   background: var(--danger);
+}
+
+/* 失败文案标红走 CSS 而不是内联样式：重试时只要把类摘掉就能复原 */
+.upload-item.failed .status {
+  color: var(--danger);
 }
 
 /* 用户自己取消的，不是错误，用中性色，别搞得像出了故障 */

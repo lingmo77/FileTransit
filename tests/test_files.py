@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from .conftest import count_stored_blobs, create_verified_user, stored_blob_bytes
 
 PAYLOAD = bytes(range(256)) * 40  # 10240 字节，内容可逐字节校验
@@ -432,7 +434,7 @@ async def test_max_upload_mb_setting_takes_effect_without_restart(admin, api, us
         payload = b"z" * (2 * 1024 * 1024)
         rejected = await api.upload("over-limit.bin", payload)
         assert rejected.status_code == 413, rejected.text
-        assert "1 MB" in rejected.text
+        assert "1.00 MB" in rejected.text
 
         # 放宽到 20MB：同一个文件立刻就能传了（无需重启进程）
         assert (
@@ -443,7 +445,39 @@ async def test_max_upload_mb_setting_takes_effect_without_restart(admin, api, us
         assert accepted.status_code == 201, accepted.text
 
         # 前台「单文件上限」展示的也是这个值
-        assert "20 MB" in (await api.get("/dashboard")).text
+        assert "20.00 MB" in (await api.get("/dashboard")).text
+    finally:
+        await admin.post(
+            "/admin/api/settings", json={"quota.max_upload_mb": original_mb}
+        )
+
+
+async def test_single_file_limit_is_typed_and_shown_in_gb(admin, api, user):
+    """单文件上限按 GB 填写和展示，内部仍然存 MB（键名不变、无需迁移）。
+
+    回归点：以前前台把 20 GB 写成「20480 MB」，后台也让人按 MB 填，两处都不好读。
+    现在展示统一走 ``human_size``（和「已用空间」那几张卡片一套格式），后台
+    输入框按 GB 填，由前端换算回 MB 再提交。
+    """
+    original = (await admin.get("/admin/api/settings")).json()["settings"]
+    original_mb = original["quota.max_upload_mb"]
+
+    try:
+        await admin.post("/admin/api/settings", json={"quota.max_upload_mb": 20480})
+
+        page = await api.get("/dashboard")
+        assert page.status_code == 200
+        assert "20.00 GB" in page.text
+        assert "20480 MB" not in page.text
+
+        form = await admin.get("/admin/settings")
+        assert form.status_code == 200
+        assert "单文件大小上限（GB）" in form.text
+        field = re.search(
+            r'name="quota\.max_upload_mb".*?value="([^"]+)"', form.text, re.S
+        )
+        assert field, "后台找不到单文件上限这个设置项"
+        assert float(field.group(1)) == 20.0, f"输入框里还是 {field.group(1)}"
     finally:
         await admin.post(
             "/admin/api/settings", json={"quota.max_upload_mb": original_mb}

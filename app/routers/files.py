@@ -13,7 +13,7 @@ from ..core.config import settings
 from ..core.database import get_db
 from ..core.deps import AuthContext, check_csrf, require_user
 from ..core.security import client_ip, new_token, upload_limiter
-from ..core.templating import fmt_iso
+from ..core.templating import fmt_iso, human_size
 from ..models import FileItem
 from ..services import files as files_service
 from ..services import quota as quota_service
@@ -83,7 +83,7 @@ async def upload_file(
     if declared is not None and declared > site_limit:
         raise HTTPException(
             status.HTTP_413_CONTENT_TOO_LARGE,
-            f"文件超过单文件上限 {cfg['max_upload_mb']} MB",
+            f"文件超过单文件上限 {human_size(site_limit)}",
         )
 
     quota = await quota_service.resolve_quota(db, auth.user)
@@ -102,7 +102,7 @@ async def upload_file(
     except storage.UploadTooLarge as exc:
         raise HTTPException(
             status.HTTP_413_CONTENT_TOO_LARGE,
-            f"文件超过允许的体积（本次上限 {exc.limit // 1024 // 1024} MB）",
+            f"文件超过允许的体积（本次上限 {human_size(exc.limit)}）",
         ) from exc
     except storage.StorageError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc

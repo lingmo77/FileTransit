@@ -34,6 +34,16 @@
           return;
         }
 
+        if (el.dataset.transform === 'mb') {
+          // 表单里用 GB 填写，设置项内部按 MB 存（单文件上限就是这么存的）。
+          // 填成非法值时整个跳过：宁可这次不提交，也不能把上限写成 null——
+          // 那会让所有上传都 500。
+          var gb = parseFloat(raw);
+          if (!isFinite(gb)) return;
+          values[name] = Math.max(1, Math.round(gb * 1024));
+          return;
+        }
+
         var type = el.dataset.type || 'str';
         if (type === 'int') {
           values[name] = raw === '' ? null : parseInt(raw, 10);

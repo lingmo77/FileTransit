@@ -179,18 +179,19 @@
             <span class="help">用户上传时可选择的最长到期时间</span>
           </div>
           <div class="field">
-            <label for="quota-upload">单文件大小上限（MB）</label>
+            <label for="quota-upload">单文件大小上限（GB）</label>
             <input
               type="number"
               id="quota-upload"
               name="quota.max_upload_mb"
-              data-type="int"
-              min="1"
-              value="{{ values.get('quota.max_upload_mb', 20480) }}"
+              data-transform="mb"
+              step="0.5"
+              min="0.5"
+              value="{{ ((values.get('quota.max_upload_mb', 20480) | int) / 1024) | round(2) }}"
             />
             <span class="help"
-              >上传时实际生效的就是这个值；环境变量 FT_MAX_UPLOAD_MB
-              只在首次建库时作为默认值，之后不再限制</span
+              >填 GB，例如 20 就是 20 GB；上传时实际生效的就是这个值。环境变量
+              FT_MAX_UPLOAD_MB 只在首次建库时作为默认值，之后不再限制</span
             >
           </div>
         </div>
