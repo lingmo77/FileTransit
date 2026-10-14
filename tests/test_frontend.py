@@ -50,7 +50,7 @@ async def test_upload_script_ships_cancel_and_speed(new_client):
     response = await guest.get("/static/js/upload.js")
     assert response.status_code == 200
 
-    script = response.text
+    script = response.text + (await guest.get("/static/js/upload-client.js")).text
     assert "xhr.abort()" in script, "取消上传没有真正调用 xhr.abort()"
     assert "formatDuration" in script, "缺少「剩余时间」的格式化"
     assert "formatSize(speed)" in script, "缺少上传速度显示"
@@ -81,7 +81,7 @@ def test_upload_queue_offers_a_retry():
 
     assert "upload-retry" in code, "队列里没有重试按钮"
     assert "row.retry.addEventListener('click', attempt)" in code, "重试按钮没接上重发"
-    assert "重新上传" in code, "重试按钮没有可读的名字"
+    assert "继续上传" in code, "续传按钮没有可读的名字"
     # 卡死时要把它露出来，否则「已停顿」就成了死路
     assert "retry.hidden = false" in code, "卡死/取消/失败时没有露出重试按钮"
 
@@ -212,15 +212,8 @@ def test_delete_syncs_the_quota_numbers():
 
 
 def test_upload_attempt_always_returns_its_slot():
-    """请求没起来就失败时也要把 ``active`` 还回去。
-
-    ``active`` 一旦多出来一个，「等队列空了再刷新」的刷新就永远排不上队——
-    整页刷新从此不再发生（计数、配额、列表全停在旧值上）。
-    """
+    """Any failure, including fingerprint and offline failures, returns the queue slot."""
     code = _code_lines((STATIC / "js" / "upload.js").read_text(encoding="utf-8"))
-
-    assert code.count("active += 1") == 1, "计数点应该只有一个"
-    assert code.count("active -= 1") == 1, "归还点应该只有一个"
-    assert "function gaveUp(" in code, "缺少「没发出去也要收尾」的兜底"
-    # 拼 FormData / open 和 send 两处都可能抛，都得兜住
-    assert code.count("gaveUp(error);") == 2, "抛错路径没有全部兜住"
+    assert code.count("active += 1") == 1
+    assert code.count("active -= 1") == 1
+    assert re.search(r"finally\s*\{\s*active -= 1;\s*finish\(\);", code)

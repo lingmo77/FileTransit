@@ -379,3 +379,24 @@ docker compose up -d
 - [ ] 配了反代的话：`FT_TRUST_PROXY=true`、`client_max_body_size` 已放宽
 - [ ] 配了邮件的话：测试邮件发送成功
 - [ ] 已确认备份方式可用
+
+
+## 1.2.0 升级补充
+
+此版本只新增 `upload_sessions` 表，由启动迁移自动创建；不重建或清空既有用户、文件、设置表。升级前保留旧镜像，并备份数据库及文件存储。断点续传临时文件放在数据卷的 `/app/data/uploads/` 内，容器重启不会丢失已确认分片。
+
+单个分片默认 4 MiB，反向代理须允许 PATCH、`Upload-Offset` 和 `X-Chunk-SHA256` 请求头，并给最终 SHA-256 校验留出足够的响应等待时间。可以在上传路由使用 `proxy_request_buffering off` 减少反代暂存；`proxy_buffering off` 只影响响应，不影响上传请求。注意保留旧上传接口所需的单文件大小限制。
+
+回滚旧应用时，新增表可以保留，但必须将新版 `migrations/` 挂载到旧容器的 `/app/migrations`，否则旧 Alembic 无法识别新增的迁移版本。不要恢复旧数据库来覆盖升级后用户新上传的数据。
+
+例如保留旧镜像为 `file-transfer:rollback-before-1.2.0`，创建 `docker-compose.rollback.yml`：
+
+```yaml
+services:
+  app:
+    image: file-transfer:rollback-before-1.2.0
+    volumes:
+      - ./migrations:/app/migrations:ro
+```
+
+先运行 `chmod -R a+rX ./migrations`，确保容器用户可读取迁移脚本，再运行 `docker compose -f docker-compose.yml -f docker-compose.rollback.yml up -d --no-build --pull never app`。新版迁移目录必须保留，原有数据卷和 `.env` 继续沿用。

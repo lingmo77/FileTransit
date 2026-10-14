@@ -207,3 +207,20 @@ sqlite3 data/app.db "select created_at, username, action, ip_address, browser fr
 # 手动触发一次过期清理（也可在后台点「立即执行维护」）
 docker compose exec app python -c "import asyncio; from app.services import cleanup; print(asyncio.run(cleanup.run_maintenance()))"
 ```
+
+
+## 分片上传与断点续传（1.2.0）
+
+上传页面会同时处理最多两个文件，每个文件按顺序发送 4 MiB 分片。网络中断时自动重试；暂停后点击「继续上传」，或重新打开页面后选择原文件，均可从服务器已确认的位置恢复。重新选择时通过完整文件 SHA-256 匹配任务，文件名相同但内容不同不会误续传。浏览器需要先读取原文件进行校验，大文件会有校验等待时间，但不会整份载入内存。
+
+点击上传行的关闭按钮会暂停，保留已上传内容；暂停后的关闭按钮、恢复任务旁的「放弃」会经确认后清理分片。任务最后一次成功写入分片后 24 小时过期，查询进度不会续期。后台维护默认每 10 分钟清理过期任务；正在写入或校验的任务有跨进程锁保护。
+
+未完成任务预占文件数量和完整文件大小配额，页面顶部「已用」仍显示已完成文件。默认每用户最多 10 个未完成任务，全站未完成任务预占上限 100 GiB，并预留 512 MiB 空闲磁盘。可在 `.env` 修改 `FT_UPLOAD_CHUNK_MB`、`FT_UPLOAD_TTL_HOURS`、`FT_UPLOAD_MAX_PENDING`、`FT_UPLOAD_TEMP_LIMIT_GB`、`FT_UPLOAD_DISK_RESERVE_MB` 后重建容器生效。
+
+分片使用原始请求体，不再产生框架的整文件暂存副本。分片与最终文件均校验 SHA-256；最终文件在同一数据卷原子移动，避免整文件合并复制。旧 `/api/files` 上传接口仍可用，并遵守未完成任务的配额预占。
+
+API：`POST /api/uploads` 创建或恢复任务，`GET /api/uploads` 列出未完成任务，`GET /api/uploads/{id}` 查询进度，`PATCH /api/uploads/{id}` 携带 `Upload-Offset` 和 `X-Chunk-SHA256` 发送分片，`POST /api/uploads/{id}/complete` 校验并完成，`DELETE /api/uploads/{id}` 放弃。写操作均要求登录及 CSRF；完成接口可重复调用，丢失成功响应不会创建重复文件。
+
+本地回归：`python -m pytest -q`。浏览器验证：在独立测试数据目录启动服务，安装 Playwright 并运行 `node tests/browser_upload.cjs`（默认访问 `127.0.0.1:8765`，使用本机 Edge）；脚本会模拟断网、响应丢失和页面刷新，不能对生产站点执行。
+
+Windows 打包：`python package.py --version 1.2.0 --image dist/file-transfer-1.0.tar`。镜像在有 Docker 的机器导出后取回本地；源码包和离线包不会包含本地数据、环境配置或虚拟环境。

@@ -69,14 +69,16 @@ async def resolve_quota(db: AsyncSession, user: User) -> QuotaInfo:
 async def ensure_can_upload(db: AsyncSession, user: User, incoming_bytes: int) -> QuotaInfo:
     """上传前校验；不通过时抛 :class:`QuotaExceeded`。"""
     quota = await resolve_quota(db, user)
+    from .uploads import reserved
+    pending_files, pending_bytes = await reserved(db, user.id)
 
-    if not quota.unlimited_files and quota.used_files + 1 > quota.max_files:
+    if not quota.unlimited_files and quota.used_files + pending_files + 1 > quota.max_files:
         raise QuotaExceeded(
             f"已达到同时分享文件数上限（{quota.max_files} 个），请先删除部分文件或等待其过期",
             field="files",
         )
 
-    if not quota.unlimited_bytes and quota.used_bytes + incoming_bytes > quota.max_bytes:
+    if not quota.unlimited_bytes and quota.used_bytes + pending_bytes + incoming_bytes > quota.max_bytes:
         free = max(0, quota.max_bytes - quota.used_bytes)
         raise QuotaExceeded(
             f"存储空间不足：剩余 {human_size(free)}，本次需要 {human_size(incoming_bytes)}"

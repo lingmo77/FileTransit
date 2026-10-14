@@ -65,11 +65,13 @@
       tabindex="0"
       data-max-expire-days="{{ max_expire_days }}"
       data-can-forever="{{ 'true' if current_user and current_user.can_save_forever else 'false' }}"
+      data-upload-ttl-hours="{{ upload_ttl_hours }}"
+      data-max-upload-bytes="{{ max_upload_bytes }}"
       aria-label="上传文件：点击选择或拖拽文件到此处"
     >
       <div class="dz-icon">{{ icon('upload', 22) }}</div>
       <div class="dz-title">拖拽文件到此处，或点击选择</div>
-      <div class="small muted">支持多选 · 单个文件最大 {{ max_upload_bytes | human_size }}</div>
+      <div class="small muted">支持断点续传 · 同时上传 2 个文件 · 单个文件最大 {{ max_upload_bytes | human_size }}</div>
     </div>
     <input type="file" id="file-input" multiple hidden />
 
@@ -97,6 +99,7 @@
       </label>
     </div>
 
+    <p class="tiny muted" style="margin-top: 12px">网络中断后可继续上传；关闭页面后重新选择原文件即可恢复。未完成上传在 {{ upload_ttl_hours }} 小时无进展后清理，并预占文件数和空间配额。</p>
     <div class="upload-queue" id="upload-queue" hidden></div>
   </section>
 
@@ -152,5 +155,7 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="/static/js/upload.js?v=7"></script>
+  <script src="/static/js/upload-hash.js?v=1"></script>
+  <script src="/static/js/upload-client.js?v=1"></script>
+  <script src="/static/js/upload.js?v=8"></script>
 {% endblock %}

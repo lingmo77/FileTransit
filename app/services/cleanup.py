@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from ..core.config import settings
 from ..core.database import SessionLocal
 from ..models import ActivityLog, EmailToken, FileItem, TaskLock, UserSession, utcnow
-from . import quota, storage
+from . import quota, storage, uploads
 from .activity import Action, log_activity
 from . import settings_service
 
@@ -163,6 +163,7 @@ async def run_maintenance() -> dict[str, int]:
         return {}
 
     stats = {
+        "expired_uploads": await uploads.purge_expired_uploads(),
         "expired_files": await purge_expired_files(),
         "tmp_files": await storage.cleanup_tmp_dir(),
         "sessions": await purge_stale_sessions(),

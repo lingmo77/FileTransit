@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from ..core.config import settings
 from ..core.database import get_db
@@ -108,6 +109,10 @@ async def upload_file(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
     original_name = storage.safe_filename(file.filename or "unnamed")
+    # Old clients remain supported, but must respect concurrent upload reservations.
+    await db.rollback()
+    await db.execute(text("BEGIN IMMEDIATE"))
+    await db.refresh(auth.user)
     try:
         # 落盘之后再复核一次配额，避免并发上传把用量撑爆
         await quota_service.ensure_can_upload(db, auth.user, stored.size)
