@@ -69,7 +69,3 @@ port=os.environ.get('FT_PORT','8000'); \
 sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=3).status==200 else 1)"
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
-
-# 版本元数据放在最后，避免每次发布让基础系统安装层的缓存失效。
-ARG VERSION=1.2.0
-LABEL org.opencontainers.image.version=$VERSION

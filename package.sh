@@ -35,9 +35,9 @@ cd "$ROOT"
 tar cf - \
     --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
     app migrations tests docker \
-    Dockerfile docker-compose.yml .dockerignore .gitignore .gitattributes .env.example \
-    alembic.ini pytest.ini requirements.txt requirements-dev.txt package.sh package.py \
-    README.md PROJECT.md DEPLOY.md FILES.md LICENSE \
+    Dockerfile docker-compose.yml .dockerignore .gitignore .env.example \
+    alembic.ini pytest.ini requirements.txt requirements-dev.txt package.sh \
+    README.md PROJECT.md DEPLOY.md FILES.md \
     | (cd "$STAGE/file-transfer" && tar xf -)
 
 mkdir -p "$DIST"

@@ -17,14 +17,12 @@
     </div>
   </div>
 
-  <!-- 配额。data-used / data-max 是给前端用的：删掉文件后这张卡得当场跟着变，
-       不能只等那次「等上传跑完再刷」的整页刷新（队列里卡着上传时它永远不来）。
-       max 用后端 quota 的哨兵值 -1 表示无限制。 -->
+  <!-- 配额 -->
   <div class="stat-grid" style="margin-bottom: 20px">
-    <div class="stat" id="stat-files" data-used="{{ quota.used_files }}" data-max="{{ -1 if quota.unlimited_files else quota.max_files }}">
+    <div class="stat">
       <div class="label">已用文件数</div>
       <div class="value">
-        <span id="stat-files-used">{{ quota.used_files }}</span>
+        {{ quota.used_files }}
         <span class="muted" style="font-size: 0.9rem; font-weight: 400">
           / {{ '∞' if quota.unlimited_files else quota.max_files }}
         </span>
@@ -36,9 +34,9 @@
       </div>
     </div>
 
-    <div class="stat" id="stat-bytes" data-used="{{ quota.used_bytes }}" data-max="{{ -1 if quota.unlimited_bytes else quota.max_bytes }}">
+    <div class="stat">
       <div class="label">已用空间</div>
-      <div class="value" id="stat-bytes-used">{{ quota.used_bytes | human_size }}</div>
+      <div class="value">{{ quota.used_bytes | human_size }}</div>
       <div class="meter {% if not quota.unlimited_bytes and quota.used_bytes * 100 / (quota.max_bytes or 1) > 85 %}warn{% endif %}" style="margin-top: 10px">
         <i
           style="width: {{ 0 if quota.unlimited_bytes else [(quota.used_bytes * 100 / (quota.max_bytes or 1)), 100] | min }}%"
@@ -65,13 +63,11 @@
       tabindex="0"
       data-max-expire-days="{{ max_expire_days }}"
       data-can-forever="{{ 'true' if current_user and current_user.can_save_forever else 'false' }}"
-      data-upload-ttl-hours="{{ upload_ttl_hours }}"
-      data-max-upload-bytes="{{ max_upload_bytes }}"
       aria-label="上传文件：点击选择或拖拽文件到此处"
     >
       <div class="dz-icon">{{ icon('upload', 22) }}</div>
       <div class="dz-title">拖拽文件到此处，或点击选择</div>
-      <div class="small muted">支持断点续传 · 同时上传 2 个文件 · 单个文件最大 {{ max_upload_bytes | human_size }}</div>
+      <div class="small muted">支持多选 · 单个文件最大 {{ max_upload_bytes | human_size }}</div>
     </div>
     <input type="file" id="file-input" multiple hidden />
 
@@ -99,7 +95,6 @@
       </label>
     </div>
 
-    <p class="tiny muted" style="margin-top: 12px">网络中断后可继续上传；关闭页面后重新选择原文件即可恢复。未完成上传在 {{ upload_ttl_hours }} 小时无进展后清理，并预占文件数和空间配额。</p>
     <div class="upload-queue" id="upload-queue" hidden></div>
   </section>
 
@@ -155,7 +150,5 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="/static/js/upload-hash.js?v=1"></script>
-  <script src="/static/js/upload-client.js?v=1"></script>
-  <script src="/static/js/upload.js?v=8"></script>
+  <script src="/static/js/upload.js?v=6"></script>
 {% endblock %}

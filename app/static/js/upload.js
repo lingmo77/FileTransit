@@ -106,13 +106,12 @@
   function createRow(file) {
     var el = document.createElement('div');
     el.className = 'upload-item';
-    el.dataset.fileName = file.name;
     el.innerHTML =
       '<div class="name"></div>' +
       '<div class="tiny muted status">等待中</div>' +
       '<div class="upload-actions">' +
-      '<button type="button" class="icon-btn upload-retry" title="继续上传" ' +
-      'aria-label="继续上传" hidden>' +
+      '<button type="button" class="icon-btn upload-retry" title="重新上传" ' +
+      'aria-label="重新上传" hidden>' +
       RETRY_ICON +
       '</button>' +
       '<button type="button" class="icon-btn upload-dismiss" title="取消上传" ' +
@@ -147,7 +146,6 @@
       dismiss: dismiss,
       retry: retry,
 
-      message: paint,
       isUploading: function () {
         return uploading;
       },
@@ -157,8 +155,8 @@
         uploading = true;
         el.classList.remove('done', 'failed', 'cancelled');
         retry.hidden = true;
-        dismiss.title = '暂停上传';
-        dismiss.setAttribute('aria-label', '暂停上传');
+        dismiss.title = '取消上传';
+        dismiss.setAttribute('aria-label', '取消上传');
         paint('等待中');
         // 先关掉过渡再归零：不然重试时进度条是从 100% 倒着缩回去的。
         // 中间读一次 offsetWidth 强制结算，让「归零」这一步先落地——
@@ -211,7 +209,7 @@
         retry.hidden = false;
       },
       cancelled: function () {
-        settle('cancelled', '已暂停，已完成的分片保留 ' + (dropzone.dataset.uploadTtlHours || '24') + ' 小时');
+        settle('cancelled', '已取消');
         retry.hidden = false;
       },
     };
@@ -257,127 +255,174 @@
     }
   }
 
-  /* 顶部那两张配额卡（已用文件数 / 已用空间）和标题计数一样，数字只由服务端
-     渲染。删掉文件后不自己改，队列里只要卡着一次上传，那次延后的整页刷新就
-     永远排不上队，数字会一直停在旧值上——和计数是同一个坑。
-
-     卡片上带 data-used / data-max，前端只减自己这一份，不去猜。max 为 -1 表示
-     无限制（后端 quota 的哨兵值），此时进度条宽度和模板一样恒为 0。 */
-  function syncQuotaAfterRemoval(size) {
-    bumpStat('stat-files', 'stat-files-used', -1, false, function (used) {
-      return String(used);
-    });
-    bumpStat('stat-bytes', 'stat-bytes-used', -(size || 0), true, function (used) {
-      return FT.formatSize(used);
-    });
-  }
-
-  function bumpStat(cardId, valueId, delta, warnable, format) {
-    var card = document.getElementById(cardId);
-    if (!card) return;
-
-    var used = Math.max(0, (parseInt(card.dataset.used, 10) || 0) + delta);
-    card.dataset.used = String(used);
-
-    var value = document.getElementById(valueId);
-    if (value) value.textContent = format(used);
-
-    var meter = card.querySelector('.meter');
-    if (!meter) return;
-    var max = parseInt(card.dataset.max, 10);
-    // 属性缺失（NaN）按无限制处理，比当成 0 容量安全
-    var limited = !isNaN(max) && max >= 0;
-    var ratio = limited ? Math.min((used * 100) / (max || 1), 100) : 0;
-    var bar = meter.querySelector('i');
-    if (bar) bar.style.width = ratio + '%';
-    // 「快满了」的红条只有空间卡有（和模板一致）
-    if (warnable) meter.classList.toggle('warn', limited && ratio > 85);
-  }
-
   function uploadOne(file) {
-    if(file.size > Number(dropzone.dataset.maxUploadBytes)) {
-      FT.toast('「' + file.name + '」超过单文件大小上限', 'error');
-      return;
-    }
-    // A server-side receipt is rediscovered by full-file SHA-256, even after reload.
-    document.querySelectorAll('[data-pending-name]').forEach(function(el) {
-      if(el.dataset.pendingName === file.name) el.remove();
-    });
     var row = createRow(file);
     queue.appendChild(row.el);
     queue.hidden = false;
     row.el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    var current = { cancelled: false };
-    var options = { expires_hours: Number(expiresSelect.value), is_public: publicCheckbox.checked };
 
-    async function attempt() {
-      if(row.isUploading()) return;
-      if(reload.timer) {
-        clearTimeout(reload.timer);
-        reload.timer = null;
-        reload.wanted = true;
+    // 当前这次尝试。重试会把整个状态换掉，旧的尝试随即作废——它的事件
+    // 回调会晚于新尝试才回来，必须让它们认不出自己还有效。
+    var current = null;
+
+    function attempt() {
+      if (current) {
+        // 上一次还挂着（多半是卡住了）：作废它并中断，从头再来。
+        // 这里必须**先**标记再 abort：abort 事件是异步派发的，晚于下面
+        // 新一次尝试才回来，届时它得认不出自己有效——否则新一次的进度条
+        // 会被它标成「已取消」。
+        current.alive = false;
+        if (current.ticker) clearInterval(current.ticker);
+        current.xhr.abort();
       }
-      current.cancelled = false;
+
+      var state = { alive: true, xhr: new XMLHttpRequest(), ticker: null };
+      current = state;
+      var xhr = state.xhr;
+
+      // 重试的话沿用上一次的计数，别重复计一次「正在上传」
+      var resume = row.isUploading();
       row.begin();
-      active += 1;
+      if (!resume) active += 1;
+
+      var form;
       try {
-        await FTUploads.run(file, options, current, row);
-        row.done();
-        uploadedSomething = true;
-        FT.toast('「' + file.name + '」上传完成', 'success');
-      } catch(error) {
-        if(error.paused) row.cancelled();
-        else {
-          row.fail(error.message || '上传失败，已完成的分片已保留');
-          FT.toast(error.message || '上传失败', 'error');
+        form = new FormData();
+        form.append('file', file);
+        form.append('expires_hours', expiresSelect.value);
+        form.append('is_public', publicCheckbox.checked ? 'true' : 'false');
+
+        xhr.open('POST', '/api/files', true);
+        xhr.setRequestHeader('X-CSRF-Token', FT.csrf());
+      } catch (error) {
+        // 选中的文件读不出来、FormData 都拼不起来：这一趟压根没发出去
+        gaveUp(error);
+        return;
+      }
+
+      // 速度表。浏览器的进度事件既密集又不均匀，直接拿两次事件的差算瞬时值会
+      // 跳得没法看，所以每 500ms 采一次样，再做指数平滑。
+      var sample = { at: 0, loaded: 0 };
+      var meter = { at: 0, speed: 0 };
+      var lastLoaded = 0;
+      var lastTotal = file.size || 0;
+
+      /** 这一次尝试的收尾；已被重试取代的话什么都不算数 */
+      function end() {
+        if (!state.alive) return;
+        state.alive = false;
+        if (state.ticker) {
+          clearInterval(state.ticker);
+          state.ticker = null;
         }
-      } finally {
+        if (current === state) current = null;
         active -= 1;
         finish();
       }
+
+      /** 请求没起来就失败时的收尾。**必须**把这一趟的计数还回去：active 一旦
+          多出来一个，之后所有「等队列空了再刷新」的刷新就全排不上队，页面
+          看起来再也不刷新了（计数、配额都会停在旧值上）。 */
+      function gaveUp(error) {
+        if (window.console && console.error) console.error(error);
+        row.fail('无法读取该文件，请重新选择');
+        FT.toast('「' + file.name + '」无法开始上传', 'error');
+        end();
+      }
+
+      xhr.upload.addEventListener('progress', function (event) {
+        if (!state.alive || !event.lengthComputable) return;
+
+        var now = Date.now();
+        lastLoaded = event.loaded;
+        lastTotal = event.total;
+        meter.at = now;
+
+        if (!sample.at) {
+          sample.at = now;
+          sample.loaded = event.loaded;
+        }
+        var elapsed = now - sample.at;
+        if (elapsed >= 500) {
+          var instant = (event.loaded - sample.loaded) / (elapsed / 1000);
+          meter.speed = meter.speed > 0 ? meter.speed * 0.7 + instant * 0.3 : instant;
+          sample.at = now;
+          sample.loaded = event.loaded;
+        }
+
+        row.progress(event.loaded / event.total, meter.speed, event.loaded, event.total);
+      });
+
+      // 卡住的时候不再有进度事件，速度读数会永远停在最后一个采样值上。
+      // 这里兜一个定时器：2 秒没动静就明说「已停顿」并露出重试按钮。
+      state.ticker = setInterval(function () {
+        if (!state.alive || !meter.at) return;
+        if (Date.now() - meter.at < 2000) return;
+        if (lastTotal > 0 && lastLoaded >= lastTotal) return; // 已在服务端处理阶段
+        row.stalled(lastTotal ? lastLoaded / lastTotal : 0);
+      }, 1000);
+
+      xhr.addEventListener('load', function () {
+        if (!state.alive) return;
+
+        var data = null;
+        try {
+          data = JSON.parse(xhr.responseText);
+        } catch (e) {
+          data = null;
+        }
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          row.done();
+          uploadedSomething = true;
+          FT.toast('「' + file.name + '」上传完成', 'success');
+        } else {
+          var message =
+            (data && (data.error || data.detail || data.message)) ||
+            '上传失败（HTTP ' + xhr.status + '）';
+          if (typeof message !== 'string') message = '上传失败';
+          row.fail(message);
+          FT.toast('「' + file.name + '」' + message, 'error');
+        }
+        end();
+      });
+
+      xhr.addEventListener('error', function () {
+        if (!state.alive) return;
+        row.fail('网络中断');
+        FT.toast('「' + file.name + '」上传中断，可以点重试', 'error');
+        end();
+      });
+
+      xhr.addEventListener('abort', function () {
+        if (!state.alive) return;
+        row.cancelled();
+        FT.toast('已取消上传「' + file.name + '」', 'info');
+        end();
+      });
+
+      try {
+        xhr.send(form);
+      } catch (error) {
+        gaveUp(error);
+      }
     }
 
-    row.dismiss.addEventListener('click', async function () {
-      if(row.isUploading()) {
-        FTUploads.pause(current);
+    // 上传中点击＝取消这次上传；已结束点击＝把这一行从列表里去掉
+    row.dismiss.addEventListener('click', function () {
+      if (!row.isUploading()) {
+        row.el.remove();
+        // 全清空后别留一个空盒子占着地方
+        if (!queue.children.length) queue.hidden = true;
         return;
       }
-      if(current.id && !row.el.classList.contains('done')) {
-        if(!await FT.confirm('放弃这次上传并删除已保存的分片？', {title:'放弃上传', okText:'放弃上传'})) return;
-        try { await FTUploads.discard(current); }
-        catch(error) { FT.toast(error.message, 'error'); return; }
-      }
-      row.el.remove();
-      if(!queue.children.length) queue.hidden = true;
+      if (current) current.xhr.abort(); // 收尾统一走 abort 事件
     });
+
     row.retry.addEventListener('click', attempt);
+
     attempt();
   }
-
-  // Browsers require users to select local files again after a page is reopened.
-  // Only names and receipts come from the server; local file bytes stay local.
-  FT.request('/api/uploads').then(function(data) {
-    (data.items || []).forEach(function(item) {
-      if(Array.from(queue.children).some(function(el) { return el.dataset.fileName === item.name; })) return;
-      var el = document.createElement('div');
-      el.className = 'upload-item';
-      el.dataset.pendingName = item.name;
-      var name = document.createElement('div'); name.className = 'name'; name.textContent = item.name;
-      var status = document.createElement('div'); status.className = 'tiny muted';
-      status.textContent = '已保存 ' + FT.formatSize(item.offset) + ' / ' + FT.formatSize(item.size) + '，请选择原文件继续上传';
-      var actions = document.createElement('div'); actions.className = 'upload-actions';
-      var resume = document.createElement('button'); resume.type = 'button'; resume.className = 'btn btn-sm';
-      resume.textContent = '继续'; resume.addEventListener('click', pick);
-      var discard = document.createElement('button'); discard.type = 'button'; discard.className = 'btn btn-sm';
-      discard.textContent = '放弃';
-      discard.addEventListener('click', async function() {
-        if(!await FT.confirm('放弃「' + item.name + '」并清理已上传分片？', {title:'放弃上传',okText:'放弃上传'})) return;
-        try { await FTUploads.discard({id:item.id}); el.remove(); if(!queue.children.length) queue.hidden=true; }
-        catch(error) { FT.toast(error.message,'error'); }
-      });
-      actions.append(resume,discard); el.append(name,status,actions); queue.appendChild(el); queue.hidden=false;
-    });
-  }).catch(function(error) { FT.toast('未能读取未完成上传：' + error.message, 'error'); });
 
   function finish() {
     if (active > 0) return; // 还有别的文件在传，等它一起收尾
@@ -397,8 +442,6 @@
     if (!button) return;
 
     var name = button.getAttribute('data-name') || '该文件';
-    // 卡片摘掉之后按钮就读不到了，先把大小拿在手里（配额卡要按它减）
-    var size = parseInt(button.getAttribute('data-size'), 10) || 0;
     var confirmed = await FT.confirm('确定删除「' + name + '」吗？此操作不可恢复。', {
       title: '删除文件',
       okText: '删除',
@@ -418,7 +461,6 @@
         setTimeout(function () {
           card.remove();
           syncListAfterRemoval();
-          syncQuotaAfterRemoval(size);
         }, 200);
       }
       FT.toast('文件已删除', 'success');

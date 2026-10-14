@@ -424,7 +424,7 @@ async def test_manual_maintenance_run(admin, user):
     response = await admin.post("/admin/api/maintenance/run")
     assert response.status_code == 200
     result = response.json()["result"]
-    assert set(result) == {"expired_files", "expired_uploads", "tmp_files", "sessions", "logs"}
+    assert set(result) == {"expired_files", "tmp_files", "sessions", "logs"}
 
 
 async def test_admin_can_take_down_any_file(admin, api, user):

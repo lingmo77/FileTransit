@@ -64,12 +64,6 @@ class Settings(BaseSettings):
     max_upload_mb: int = 20480
     #: 服务端读写文件的块大小
     io_chunk_kb: int = 1024
-    # 分片直接流式写入；未完成任务的配额由数据库预占。
-    upload_chunk_mb: int = 4
-    upload_ttl_hours: int = 24
-    upload_max_pending: int = 10
-    upload_temp_limit_gb: int = 100
-    upload_disk_reserve_mb: int = 512
     #: 过期文件清理间隔（分钟）
     cleanup_interval_minutes: int = 10
 
@@ -103,15 +97,11 @@ class Settings(BaseSettings):
         return self.data_dir / "tmp"
 
     @property
-    def uploads_dir(self) -> Path:
-        return self.data_dir / "uploads"
-
-    @property
     def io_chunk_size(self) -> int:
         return self.io_chunk_kb * 1024
 
     def ensure_dirs(self) -> None:
-        for path in (self.data_dir, self.storage_dir, self.tmp_dir, self.uploads_dir):
+        for path in (self.data_dir, self.storage_dir, self.tmp_dir):
             path.mkdir(parents=True, exist_ok=True)
 
 

@@ -50,7 +50,7 @@ async def test_upload_script_ships_cancel_and_speed(new_client):
     response = await guest.get("/static/js/upload.js")
     assert response.status_code == 200
 
-    script = response.text + (await guest.get("/static/js/upload-client.js")).text
+    script = response.text
     assert "xhr.abort()" in script, "取消上传没有真正调用 xhr.abort()"
     assert "formatDuration" in script, "缺少「剩余时间」的格式化"
     assert "formatSize(speed)" in script, "缺少上传速度显示"
@@ -81,7 +81,7 @@ def test_upload_queue_offers_a_retry():
 
     assert "upload-retry" in code, "队列里没有重试按钮"
     assert "row.retry.addEventListener('click', attempt)" in code, "重试按钮没接上重发"
-    assert "继续上传" in code, "续传按钮没有可读的名字"
+    assert "重新上传" in code, "重试按钮没有可读的名字"
     # 卡死时要把它露出来，否则「已停顿」就成了死路
     assert "retry.hidden = false" in code, "卡死/取消/失败时没有露出重试按钮"
 
@@ -162,58 +162,16 @@ def test_hidden_file_grid_is_really_hidden():
     )
 
 
-async def test_quota_cards_carry_their_numbers_for_the_client(api, user):
-    """配额卡上的数字要跟着卡片一起下发，前端才能就地改。
-
-    数字只由服务端渲染的话，删完文件只能干等那次「等上传跑完再刷」的整页
-    刷新——队列里卡着一次上传时它永远不来，配额会一直停在旧值上。
-    """
-    empty_page = await api.get("/dashboard")
-    for card in ("stat-files", "stat-bytes"):
-        match = re.search(
-            r'id="' + card + r'"[^>]*data-used="(\d+)"[^>]*data-max="(-?\d+)"', empty_page.text
-        )
-        assert match, f"{card} 没有下发 data-used / data-max，前端只能去解析文本"
-        assert match.group(1) == "0"
-    assert 'id="stat-files-used"' in empty_page.text, "文件数没有单独的可改节点"
-    assert 'id="stat-bytes-used"' in empty_page.text, "空间数没有单独的可改节点"
-
-    # 无限制用后端 quota 的哨兵值 -1，前端据此把进度条宽度定成 0
-    assert re.search(r'id="stat-files"[^>]*data-max="-?\d+"', empty_page.text)
-
-    await api.upload("only.bin", b"x" * 32)
-    page = await api.get("/dashboard")
-
-    assert re.search(r'id="stat-files"[^>]*data-used="1"', page.text), "文件数没算进去"
-    assert re.search(r'id="stat-bytes"[^>]*data-used="32"', page.text), "空间没算进去"
-    # 删卡片时要按这个数字减掉；和页面上别处一样用 FT.formatSize 渲染
-    assert re.search(r'data-delete-file="\d+"[^>]*data-size="32"', page.text), (
-        "删除按钮没带上文件大小，前端无从扣减空间"
-    )
-
-
-def test_delete_syncs_the_quota_numbers():
-    """删除后配额卡当场跟着变，而不是等那次可能永远不来的整页刷新。"""
-    code = (STATIC / "js" / "upload.js").read_text(encoding="utf-8")
-
-    assert "function syncQuotaAfterRemoval(size)" in code, "没有就地更新配额的收尾函数"
-    # 必须和摘卡片、改计数在同一步里调用
-    assert re.search(
-        r"card\.remove\(\);\s*\n\s*syncListAfterRemoval\(\);\s*\n\s*syncQuotaAfterRemoval\(size\);",
-        code,
-    ), "摘掉卡片后没有同步配额"
-    # 数字只减自己那一份，从卡片的 data-* 上取；不许去 parse 页面文本
-    assert "card.dataset.used" in code and "parseInt(card.dataset.max, 10)" in code
-    assert "FT.formatSize(used)" in code, "空间要用和页面一致的格式化函数"
-    assert "bar.style.width" in code, "进度条宽度没跟着重算"
-    assert "classList.toggle('warn'" in code, "「快满了」的红条没跟着撤销"
-    # 大小得在卡片被摘掉之前读
-    assert "button.getAttribute('data-size')" in code, "没有从删除按钮上取文件大小"
-
-
 def test_upload_attempt_always_returns_its_slot():
-    """Any failure, including fingerprint and offline failures, returns the queue slot."""
+    """请求没起来就失败时也要把 ``active`` 还回去。
+
+    ``active`` 一旦多出来一个，「等队列空了再刷新」的刷新就永远排不上队——
+    整页刷新从此不再发生（计数、配额、列表全停在旧值上）。
+    """
     code = _code_lines((STATIC / "js" / "upload.js").read_text(encoding="utf-8"))
-    assert code.count("active += 1") == 1
-    assert code.count("active -= 1") == 1
-    assert re.search(r"finally\s*\{\s*active -= 1;\s*finish\(\);", code)
+
+    assert code.count("active += 1") == 1, "计数点应该只有一个"
+    assert code.count("active -= 1") == 1, "归还点应该只有一个"
+    assert "function gaveUp(" in code, "缺少「没发出去也要收尾」的兜底"
+    # 拼 FormData / open 和 send 两处都可能抛，都得兜住
+    assert code.count("gaveUp(error);") == 2, "抛错路径没有全部兜住"

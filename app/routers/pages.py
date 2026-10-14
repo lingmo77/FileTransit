@@ -8,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.database import get_db
-from ..core.config import settings
 from ..core.deps import AuthContext, get_auth, page_context, require_user_page
 from ..core.templating import CATEGORY_LABELS, templates
 from ..models import ActivityLog, UserSession, utcnow
@@ -203,7 +202,6 @@ async def dashboard(
         kind=kind,
         max_expire_days=cfg["max_expire_days"],
         max_upload_bytes=cfg["max_upload_bytes"],
-        upload_ttl_hours=max(1, settings.upload_ttl_hours),
     )
     return templates.TemplateResponse(request, "dashboard.html", context)
 
