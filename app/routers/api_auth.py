@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.concurrency import run_in_threadpool
 
 from ..core.config import settings
 from ..core.database import get_db
@@ -17,7 +16,7 @@ from ..core.security import (
     register_limiter,
     resend_limiter,
     user_agent,
-    verify_password,
+    verify_password_async,
 )
 from ..services import account
 from ..services import auth as auth_service
@@ -186,8 +185,8 @@ async def login(
 
     user = await auth_service.find_user_by_login(db, payload.login)
     # bcrypt 校验较慢，放到线程池避免阻塞事件循环
-    ok = user is not None and await run_in_threadpool(
-        verify_password, payload.password, user.password_hash
+    ok = user is not None and await verify_password_async(
+        payload.password, user.password_hash
     )
 
     if not ok:

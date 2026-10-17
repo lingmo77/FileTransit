@@ -14,6 +14,11 @@
   var canForever = dropzone.dataset.canForever === 'true';
   var active = 0;
   var uploadedSomething = false;
+  var pending = [];
+  var MAX_ACTIVE = 2;
+  function pump() {
+    while (active < MAX_ACTIVE && pending.length) pending.shift()();
+  }
 
   var EXPIRY_OPTIONS = [
     [1, '1 小时'],
@@ -95,7 +100,7 @@
   /** 把秒数写成人话：45 秒 / 6 分 12 秒 / 1 小时 5 分 */
   function formatDuration(seconds) {
     if (!isFinite(seconds) || seconds <= 0) return '';
-    var total = Math.round(seconds);
+    var total = Math.max(1, Math.ceil(seconds));
     if (total < 60) return total + ' 秒';
     var minutes = Math.floor(total / 60);
     var rest = total % 60;
@@ -183,19 +188,18 @@
           return;
         }
 
-        var text = percent;
-        if (speed > 0) {
-          text += ' · ' + FT.formatSize(speed) + '/s';
-          var left = (total - loaded) / speed;
-          var human = formatDuration(left);
-          if (human) text += ' · 剩余 ' + human;
+        if (!status.querySelector('.upload-percent')) {
+          status.innerHTML = '<span class="upload-percent"></span><span class="upload-speed"></span><span class="upload-eta"></span>';
         }
-        paint(text);
+        status.querySelector('.upload-percent').textContent = percent;
+        status.querySelector('.upload-speed').textContent = speed > 0 ? FT.formatSize(speed) + '/s' : '';
+        status.querySelector('.upload-eta').textContent = speed > 0 ? '剩余 ' + formatDuration((total - loaded) / speed) : '';
+        return;
       },
 
       /** 超过 2 秒没有收到进度事件：别再让读数停在一个骗人的值上，并把重试露出来 */
       stalled: function (percent) {
-        paint(percent + ' · 已停顿，可重试…');
+        paint(Math.round(percent * 100) + '% · 已停顿，可重试…');
         retry.hidden = false;
       },
 
@@ -215,18 +219,38 @@
     };
   }
 
-  /* 页面重载会掐断所有在传的 XHR——队列会因此集体变成「已取消」。
-     所以凡是「改完想刷新」的地方都登记到这里，等上传队列空了再真刷。 */
-  var reload = { wanted: false, delay: 900, timer: null };
-
+  // 只更新列表和配额，保留进行中的请求以及等待/失败队列。
+  var syncTimer = null;
+  var syncBusy = false;
+  var syncAgain = false;
   function refresh(delay) {
-    if (delay !== undefined) reload.delay = delay;
-    reload.wanted = true;
-    if (reload.timer || active > 0) return; // 还有上传在跑，等它结束再来兑现
-    reload.wanted = false;
-    reload.timer = setTimeout(function () {
-      window.location.reload();
-    }, reload.delay);
+    if (syncBusy) { syncAgain = true; return; }
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(async function () {
+      syncTimer = null;
+      syncBusy = true;
+      try {
+        var response = await fetch(window.location.href, { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok || response.redirected) throw new Error('列表同步失败，请刷新页面');
+        var doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+        ['quota-stats', 'share-count', 'file-grid', 'file-grid-empty', 'file-pagination'].forEach(function (id) {
+          var before = document.getElementById(id), after = doc.getElementById(id);
+          if (before && after) before.replaceWith(after);
+        });
+        var freshDrop = doc.getElementById('dropzone');
+        if (freshDrop) {
+          dropzone.dataset.remainingFiles = freshDrop.dataset.remainingFiles;
+          dropzone.dataset.remainingBytes = freshDrop.dataset.remainingBytes;
+        }
+        var emptyPick = document.getElementById('pick-files-empty');
+        if (emptyPick) emptyPick.onclick = pick;
+      } catch (error) {
+        FT.toast(error.message || '列表同步失败，请稍后刷新', 'error');
+      } finally {
+        syncBusy = false;
+        if (syncAgain) { syncAgain = false; refresh(0); }
+      }
+    }, delay === undefined ? 150 : delay);
   }
 
   function uploadAll(fileList) {
@@ -256,6 +280,15 @@
   }
 
   function uploadOne(file) {
+    var maxBytes = Number(dropzone.dataset.maxUploadBytes || Infinity);
+    var remainingFiles = Number(dropzone.dataset.remainingFiles || -1);
+    var remainingBytes = Number(dropzone.dataset.remainingBytes || -1);
+    if (file.size > maxBytes || remainingFiles === 0 || (remainingBytes >= 0 && file.size > remainingBytes)) {
+      FT.toast('「' + file.name + '」超过单文件上限或当前可用配额', 'error');
+      return;
+    }
+    var selectedHours = expiresSelect.value;
+    var selectedPublic = publicCheckbox.checked;
     var row = createRow(file);
     queue.appendChild(row.el);
     queue.hidden = false;
@@ -265,7 +298,29 @@
     // 回调会晚于新尝试才回来，必须让它们认不出自己还有效。
     var current = null;
 
+    var waiting = false;
+    var queueVersion = 0;
     function attempt() {
+      if (waiting) return;
+      if (current) {
+        var previous = current;
+        previous.xhr.abort();
+        previous.end(); // 即使旧 abort 回调稍后才到，也先可靠归还它的名额
+      }
+      waiting = true;
+      var version = ++queueVersion;
+      row.el.classList.remove('done', 'failed', 'cancelled');
+      row.retry.hidden = true;
+      row.el.querySelector('.status').textContent = '排队中';
+      pending.push(function () {
+        if (!waiting || version !== queueVersion) return;
+        waiting = false;
+        startAttempt();
+      });
+      pump();
+    }
+
+    function startAttempt() {
       if (current) {
         // 上一次还挂着（多半是卡住了）：作废它并中断，从头再来。
         // 这里必须**先**标记再 abort：abort 事件是异步派发的，晚于下面
@@ -277,6 +332,7 @@
       }
 
       var state = { alive: true, xhr: new XMLHttpRequest(), ticker: null };
+      state.end = end;
       current = state;
       var xhr = state.xhr;
 
@@ -287,12 +343,11 @@
 
       var form;
       try {
-        form = new FormData();
-        form.append('file', file);
-        form.append('expires_hours', expiresSelect.value);
-        form.append('is_public', publicCheckbox.checked ? 'true' : 'false');
-
-        xhr.open('POST', '/api/files', true);
+        form = file;
+        var params = new URLSearchParams({filename: file.name, expires_hours: selectedHours,
+          is_public: selectedPublic ? 'true' : 'false'});
+        xhr.open('POST', '/api/files?' + params.toString(), true);
+        xhr.setRequestHeader('Content-Type', 'application/octet-stream');
         xhr.setRequestHeader('X-CSRF-Token', FT.csrf());
       } catch (error) {
         // 选中的文件读不出来、FormData 都拼不起来：这一趟压根没发出去
@@ -306,6 +361,7 @@
       var meter = { at: 0, speed: 0 };
       var lastLoaded = 0;
       var lastTotal = file.size || 0;
+      var lastPaint = 0;
 
       /** 这一次尝试的收尾；已被重试取代的话什么都不算数 */
       function end() {
@@ -317,6 +373,7 @@
         }
         if (current === state) current = null;
         active -= 1;
+        pump();
         finish();
       }
 
@@ -350,7 +407,10 @@
           sample.loaded = event.loaded;
         }
 
-        row.progress(event.loaded / event.total, meter.speed, event.loaded, event.total);
+        if (now - lastPaint >= 250 || event.loaded >= event.total) {
+          lastPaint = now;
+          row.progress(event.loaded / event.total, meter.speed, event.loaded, event.total);
+        }
       });
 
       // 卡住的时候不再有进度事件，速度读数会永远停在最后一个采样值上。
@@ -375,6 +435,7 @@
         if (xhr.status >= 200 && xhr.status < 300) {
           row.done();
           uploadedSomething = true;
+          refresh(100);
           FT.toast('「' + file.name + '」上传完成', 'success');
         } else {
           var message =
@@ -410,6 +471,7 @@
 
     // 上传中点击＝取消这次上传；已结束点击＝把这一行从列表里去掉
     row.dismiss.addEventListener('click', function () {
+      if (waiting) { waiting = false; row.cancelled(); pump(); return; }
       if (!row.isUploading()) {
         row.el.remove();
         // 全清空后别留一个空盒子占着地方
@@ -425,14 +487,7 @@
   }
 
   function finish() {
-    if (active > 0) return; // 还有别的文件在传，等它一起收尾
-    if (uploadedSomething) {
-      // 让用户看清进度条完成，再刷新列表
-      uploadedSomething = false;
-      refresh(900);
-      return;
-    }
-    if (reload.wanted) refresh(); // 兑现删除 / 修改文件时登记的刷新
+    if (uploadedSomething) { uploadedSomething = false; refresh(100); }
   }
 
   /* ---------------------------------------------------------- 删除文件 */
@@ -455,17 +510,12 @@
       });
       var card = button.closest('.file-card');
       if (card) {
-        card.style.transition = 'opacity .2s, transform .2s';
-        card.style.opacity = '0';
-        card.style.transform = 'scale(.96)';
-        setTimeout(function () {
-          card.remove();
-          syncListAfterRemoval();
-        }, 200);
+        card.remove();
+        syncListAfterRemoval();
       }
       FT.toast('文件已删除', 'success');
       // 走 refresh 而不是直接 reload：正在上传的文件不能被这一下掐断
-      refresh(900);
+      refresh(0);
     } catch (error) {
       FT.toast(error.message, 'error');
       restore();
@@ -566,7 +616,7 @@
         });
         FT.toast('已保存', 'success');
         close();
-        refresh(700);
+        refresh(0);
       } catch (error) {
         FT.toast(error.message, 'error');
         restore();

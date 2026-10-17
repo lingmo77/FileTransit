@@ -8,7 +8,7 @@ import re
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.security import hash_password, password_problem, verify_password
+from ..core.security import hash_password_async, password_problem, verify_password_async
 from ..models import User
 from . import auth as auth_service
 from . import mailer, settings_service
@@ -84,7 +84,7 @@ async def register(
     user = User(
         username=username,
         email=email,
-        password_hash=hash_password(password),
+        password_hash=await hash_password_async(password),
         email_verified=not require_verification,
     )
     db.add(user)
@@ -167,7 +167,7 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Use
     if user is None:
         return None
 
-    user.password_hash = hash_password(new_password)
+    user.password_hash = await hash_password_async(new_password)
     user.must_change_password = False
     await db.commit()
     # 改密后所有旧会话失效
@@ -181,7 +181,7 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Use
 async def change_password(
     db: AsyncSession, user: User, *, current: str, new: str, keep_session_token: str | None = None
 ) -> None:
-    if not verify_password(current, user.password_hash):
+    if not await verify_password_async(current, user.password_hash):
         raise AccountError("当前密码不正确", field="current")
     problem = password_problem(new)
     if problem:
@@ -189,7 +189,7 @@ async def change_password(
     if current == new:
         raise AccountError("新密码不能与当前密码相同", field="password")
 
-    user.password_hash = hash_password(new)
+    user.password_hash = await hash_password_async(new)
     user.must_change_password = False
     await db.commit()
 

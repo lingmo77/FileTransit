@@ -5,13 +5,14 @@ from __future__ import annotations
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.database import get_db
 from ..core.deps import AuthContext, check_csrf, require_admin
-from ..core.security import hash_password, password_problem
+from ..core.security import hash_password_async, password_problem
 from ..models import User, utcnow
 from ..services import cleanup, logs as logs_service, mailer, stats, storage
 from ..services import files as files_service
@@ -150,7 +151,7 @@ async def create_user(
     user = User(
         username=username,
         email=email,
-        password_hash=hash_password(payload.password),
+        password_hash=await hash_password_async(payload.password),
         is_admin=payload.is_admin,
         email_verified=payload.email_verified,
         can_permanent=payload.can_permanent,
@@ -206,7 +207,7 @@ async def update_user(
         problem = password_problem(str(data["password"]))
         if problem:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, problem)
-        user.password_hash = hash_password(str(data["password"]))
+        user.password_hash = await hash_password_async(str(data["password"]))
         user.must_change_password = True
         changes["password"] = "***"
 
@@ -300,7 +301,11 @@ async def delete_user(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "至少需要保留一名管理员")
 
     username = user.username
-    file_count, freed = await users_service.delete_user(db, user)
+    try:
+        file_count, freed = await users_service.delete_user(db, user)
+    except files_service.DeletionFailed as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "部分文件删除失败，用户已停用并保留，请重试删除") from exc
 
     await log_activity(
         action=Action.ADMIN_USER_UPDATE,
@@ -353,23 +358,28 @@ async def update_file(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "文件不存在")
 
     changes: dict[str, object] = {}
+    values: dict[str, object] = {}
     if payload.expires_hours is not None:
         if payload.expires_hours <= files_service.FOREVER_HOURS:
-            item.expires_at = None
+            values["expires_at"] = None
             changes["expires_hours"] = files_service.FOREVER_LABEL
         else:
-            item.expires_at = utcnow() + timedelta(hours=payload.expires_hours)
+            values["expires_at"] = utcnow() + timedelta(hours=payload.expires_hours)
             changes["expires_hours"] = payload.expires_hours
     if payload.is_public is not None:
-        item.is_public = payload.is_public
+        values["is_public"] = payload.is_public
         changes["is_public"] = payload.is_public
     if payload.original_name:
-        item.original_name = storage.safe_filename(payload.original_name)
-        changes["original_name"] = item.original_name
+        values["original_name"] = storage.safe_filename(payload.original_name)
+        changes["original_name"] = values["original_name"]
 
     if not changes:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有需要更新的内容")
 
+    if not await files_service.update_if_available(db, file_id, values, public_id=item.public_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "文件已进入清理，无法修改")
+    if "expires_at" in values:
+        await quota_service.sync_usage(db, item.user_id)
     await db.commit()
     await db.refresh(item)
     await log_activity(
@@ -391,15 +401,15 @@ async def delete_file(
     auth: AuthContext = Depends(require_admin),
     _csrf: None = Depends(check_csrf),
 ) -> JSONResponse:
-    item = await files_service.get_by_id(db, file_id)
+    item = await files_service.get_by_id(db, file_id, include_deleted=True)
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "文件不存在")
 
     detail = {"filename": item.original_name, "size": item.size, "owner": item.user_id}
-    await storage.delete_object(item.stored_path)
-    await db.delete(item)
-    await quota_service.release(db, item.user_id, item.size)
-    await db.commit()
+    try:
+        await files_service.delete_record(db, item)
+    except files_service.DeletionFailed as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
     await log_activity(
         action=Action.ADMIN_DELETE_FILE,
@@ -478,7 +488,7 @@ class LogPurgeIn(BaseModel):
     after: str = ""
     action: str = ""
     status_filter: str = Field(default="", alias="status")
-    vacuum: bool = True
+    vacuum: bool = False
 
     model_config = {"populate_by_name": True}
 
@@ -528,7 +538,7 @@ async def purge_logs(
     )
 
 
-@router.get("/logs/export", response_class=PlainTextResponse)
+@router.get("/logs/export", response_class=FileResponse)
 async def export_logs(
     db: AsyncSession = Depends(get_db),
     q: str = Query("", max_length=120),
@@ -538,10 +548,11 @@ async def export_logs(
     ip: str = Query("", max_length=64),
     start: str = Query("", max_length=32),
     end: str = Query("", max_length=32),
-) -> PlainTextResponse:
+) -> FileResponse:
     tz = await logs_service.site_tz(db)
-    rows = await logs_service.fetch_for_export(
-        db,
+    await db.close()
+    path = await logs_service.export_to_file(
+        tz_name=tz,
         q=q.strip() or None,
         action=action.strip() or None,
         status_filter=status_filter.strip() or None,
@@ -550,13 +561,13 @@ async def export_logs(
         start=logs_service.parse_date(start, tz_name=tz),
         end=logs_service.parse_date(end, tz_name=tz, end_of_day=True),
     )
-    csv_text = logs_service.export_csv(rows, tz_name=tz)
     filename = f"logs-{utcnow().strftime('%Y%m%d-%H%M%S')}.csv"
-    return PlainTextResponse(
-        # 加 BOM，Excel 打开中文不乱码
-        "﻿" + csv_text,
+    return FileResponse(
+        path,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        filename=filename,
+        headers={"Cache-Control": "private, no-store"},
+        background=BackgroundTask(path.unlink, missing_ok=True),
     )
 
 

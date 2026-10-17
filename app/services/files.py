@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -170,14 +170,51 @@ async def get_by_public_id(db: AsyncSession, public_id: str) -> FileItem | None:
     ).scalar_one_or_none()
 
 
-async def get_by_id(db: AsyncSession, file_id: int) -> FileItem | None:
+async def get_by_id(db: AsyncSession, file_id: int, *, include_deleted: bool = False) -> FileItem | None:
     return (
         await db.execute(
             select(FileItem)
             .options(selectinload(FileItem.owner))
-            .where(FileItem.id == file_id, FileItem.is_deleted.is_(False))
+            .where(FileItem.id == file_id, True if include_deleted else FileItem.is_deleted.is_(False))
         )
     ).scalar_one_or_none()
+
+
+async def update_if_available(db: AsyncSession, file_id: int, values: dict, *, public_id: str) -> bool:
+    """与清理任务原子竞争；已被认领清理的文件不能再续期或修改。"""
+    result = await db.execute(
+        update(FileItem)
+        .where(FileItem.id == file_id, FileItem.public_id == public_id, FileItem.is_deleted.is_(False))
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    return bool(result.rowcount)
+
+
+class DeletionFailed(Exception):
+    pass
+
+
+async def delete_record(db: AsyncSession, item: FileItem) -> None:
+    """先持久标记，成功清理磁盘后再删除索引、重算用量；失败可再次请求。"""
+    from . import quota, storage
+    result = await db.execute(update(FileItem).where(
+        FileItem.id == item.id, FileItem.public_id == item.public_id,
+    ).values(is_deleted=True))
+    await db.commit()
+    if not result.rowcount:
+        return  # 原文件已被别的请求删除；不能操作复用该数字编号的新文件
+    try:
+        result = await storage.delete_object(item.stored_path)
+        if not result:
+            raise DeletionFailed("磁盘文件删除失败，已保留记录，请稍后重试")
+    except DeletionFailed:
+        raise
+    except Exception as exc:
+        raise DeletionFailed("磁盘文件删除失败，已保留记录，请稍后重试") from exc
+    await db.execute(delete(FileItem).where(FileItem.id == item.id, FileItem.public_id == item.public_id))
+    await quota.sync_usage(db, item.user_id)
+    await db.commit()
 
 
 async def public_summary(db: AsyncSession) -> tuple[int, int]:
@@ -226,6 +263,7 @@ __all__ = [
     "resolve_expiry",
     "get_by_id",
     "get_by_public_id",
+    "update_if_available",
     "list_admin",
     "list_for_user",
     "list_public",

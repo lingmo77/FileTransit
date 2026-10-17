@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     max_upload_mb: int = 20480
     #: 服务端读写文件的块大小
     io_chunk_kb: int = 1024
+    upload_concurrency: int = 8
+    upload_user_concurrency: int = 3
+    upload_temp_max_mb: int = 40960
+    upload_idle_timeout_seconds: int = 120
     #: 过期文件清理间隔（分钟）
     cleanup_interval_minutes: int = 10
 

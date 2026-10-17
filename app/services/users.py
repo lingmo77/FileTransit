@@ -70,7 +70,11 @@ async def count_admins(db: AsyncSession, *, exclude_id: int | None = None) -> in
 async def delete_user(db: AsyncSession, user: User) -> tuple[int, int]:
     """删除用户及其全部文件（磁盘 + 记录）。返回 (文件数, 释放字节数)。"""
     from ..models import FileItem
-    from . import storage
+    from . import files as files_service
+
+    # 阻止新上传提交；部分文件删除失败时保留停用用户，供管理员重试。
+    user.is_active = False
+    await db.commit()
 
     files = (
         (await db.execute(select(FileItem).where(FileItem.user_id == user.id)))
@@ -79,10 +83,7 @@ async def delete_user(db: AsyncSession, user: User) -> tuple[int, int]:
     )
     freed = 0
     for item in files:
-        try:
-            await storage.delete_object(item.stored_path)
-        except Exception:  # noqa: BLE001
-            pass
+        await files_service.delete_record(db, item)
         freed += item.size
 
     await db.delete(user)

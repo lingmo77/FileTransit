@@ -56,11 +56,33 @@ async def acquire_lock(db, name: str, ttl_seconds: int) -> bool:
 # ------------------------------------------------------------------ 过期文件
 
 
+async def claim_expired_file(db, file_id: int, cutoff: datetime, *, public_id: str | None = None) -> bool:
+    """提交清理认领后才允许碰磁盘；续期必须与这个条件更新竞争。
+
+    已认领的记录也可再次处理，用于进程中断或磁盘删除失败后的重试。
+    """
+    if public_id is None:
+        public_id = await db.scalar(select(FileItem.public_id).where(FileItem.id == file_id))
+    result = await db.execute(
+        update(FileItem)
+        .where(
+            FileItem.id == file_id,
+            FileItem.public_id == public_id,
+            or_(FileItem.is_deleted.is_(True), FileItem.expires_at <= cutoff),
+        )
+        .values(is_deleted=True)
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    return bool(result.rowcount)
+
+
 async def purge_expired_files(*, batch_size: int = 500) -> int:
     """删除所有已过期文件（磁盘 + 记录），并重算受影响用户的用量。"""
     now = utcnow()
     total = 0
     affected_users: set[int] = set()
+    after_id = 0
 
     while True:
         async with SessionLocal() as db:
@@ -68,8 +90,11 @@ async def purge_expired_files(*, batch_size: int = 500) -> int:
                 (
                     await db.execute(
                         select(FileItem)
-                        .where(FileItem.expires_at <= now)
-                        .order_by(FileItem.expires_at)
+                        .where(
+                            FileItem.id > after_id,
+                            or_(FileItem.is_deleted.is_(True), FileItem.expires_at <= now),
+                        )
+                        .order_by(FileItem.id)
                         .limit(batch_size)
                     )
                 )
@@ -79,16 +104,25 @@ async def purge_expired_files(*, batch_size: int = 500) -> int:
             if not files:
                 break
 
+            after_id = files[-1].id
             for item in files:
+                if not await claim_expired_file(db, item.id, now, public_id=item.public_id):
+                    continue  # 用户已先续期成功，不能删除查询时的旧快照
                 affected_users.add(item.user_id)
                 try:
-                    await storage.delete_object(item.stored_path)
+                    removed = await storage.delete_object(item.stored_path)
+                    if not removed:
+                        logger.warning("删除文件失败，保留清理记录等待重试: %s", item.stored_path)
+                        continue
                 except Exception:  # noqa: BLE001 - 单个文件删不掉不应中断整批
                     logger.warning("删除文件失败: %s", item.stored_path, exc_info=True)
-                await db.delete(item)
-
-            await db.commit()
-            total += len(files)
+                    continue
+                result = await db.execute(
+                    delete(FileItem).where(FileItem.id == item.id, FileItem.public_id == item.public_id,
+                                           FileItem.is_deleted.is_(True))
+                )
+                await db.commit()
+                total += result.rowcount or 0
 
     if affected_users:
         async with SessionLocal() as db:

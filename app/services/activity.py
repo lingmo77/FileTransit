@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -15,6 +16,8 @@ from fastapi import Request
 from ..core.database import SessionLocal
 from ..core.security import client_ip, user_agent
 from ..models import ActivityLog, User
+
+logger = logging.getLogger(__name__)
 
 
 class Action:
@@ -126,7 +129,7 @@ def parse_user_agent(ua: str | None) -> tuple[str, str, str]:
 # ------------------------------------------------------------------ 写入
 
 
-async def log_activity(
+async def _write_activity(
     *,
     action: str,
     user: User | None = None,
@@ -166,3 +169,11 @@ async def log_activity(
     async with SessionLocal() as session:
         session.add(record)
         await session.commit()
+
+
+async def log_activity(**kwargs) -> None:
+    """日志允许降级；已提交业务不能因独立审计事务失败而报告失败。"""
+    try:
+        await _write_activity(**kwargs)
+    except Exception:
+        logger.exception("审计日志写入失败 action=%s target=%s", kwargs.get("action"), kwargs.get("target_id"))

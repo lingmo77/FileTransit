@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent
 MANIFEST = ["app", "migrations", "tests", "docker", "Dockerfile", "docker-compose.yml",
             ".dockerignore", ".gitignore", ".gitattributes", ".env.example", "alembic.ini", "pytest.ini",
             "requirements.txt", "requirements-dev.txt", "package.sh", "package.py",
-            "README.md", "PROJECT.md", "DEPLOY.md", "FILES.md", "LICENSE"]
+            "README.md", "PROJECT.md", "DEPLOY.md", "FILES.md", "LICENSE", "AGENTS.md", "AUDIT_FIXES.md"]
 
 
 def checksum(path):

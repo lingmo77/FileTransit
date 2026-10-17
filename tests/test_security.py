@@ -26,14 +26,15 @@ def test_password_hash_is_salted_and_verifiable():
     assert hash_password("same") != hash_password("same")
 
 
-def test_password_beyond_bcrypt_limit_does_not_crash():
-    """bcrypt 只取前 72 字节，超长密码必须被安全截断而不是抛异常。"""
+def test_new_password_rejects_long_bytes_but_legacy_login_works():
+    from app.core.security import password_problem
     password = "a" * 200
-    hashed = hash_password(password)
-
-    assert verify_password(password, hashed)
-    # 前 72 字节相同即视为同一密码（bcrypt 的固有行为，这里固定住以免回归）
-    assert verify_password("a" * 72, hashed)
+    with pytest.raises(ValueError, match="72"):
+        hash_password(password)
+    assert "72" in password_problem("中" * 24 + "1")
+    legacy_hash = hash_password("a" * 72)
+    assert verify_password(password, legacy_hash)
+    assert verify_password("a" * 72, legacy_hash)
 
 
 def test_new_token_is_urlsafe_and_unique():

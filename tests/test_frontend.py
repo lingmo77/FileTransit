@@ -58,21 +58,12 @@ async def test_upload_script_ships_cancel_and_speed(new_client):
     assert "upload-dismiss" in script, "取消按钮没有绑定到上传行上"
 
 
-def test_upload_queue_has_exactly_one_reload_exit():
-    """队列页只留一个刷新出口，而且它必须等上传跑完。
-
-    回归点：删除/修改文件后直接 ``location.reload()``，浏览器会把在途的
-    XHR 全部 abort——正在传的那几个当场变成「已取消」，看起来像是用户自己
-    的删除操作把上传弄没了。所以这些地方一律登记到 ``refresh()``，
-    由它等队列空了再刷。
-    """
+def test_upload_updates_fragments_without_reloading_active_requests():
     code = _code_lines((STATIC / "js" / "upload.js").read_text(encoding="utf-8"))
-
-    assert code.count("window.location.reload()") == 1, "队列页出现了第二个刷新出口"
-    assert "if (reload.timer || active > 0) return;" in code, "刷新前没有「还有上传在跑」的把关"
-    # 删除 / 修改文件都得走 refresh，不许自己动手 reload
-    assert "refresh(900)" in code, "删除文件后没有走 refresh"
-    assert "refresh(700)" in code, "修改文件后没有走 refresh"
+    assert "window.location.reload()" not in code
+    assert "DOMParser" in code
+    assert "quota-stats" in code and "file-grid" in code
+    assert "MAX_ACTIVE = 2" in code and "active < MAX_ACTIVE" in code
 
 
 def test_upload_queue_offers_a_retry():

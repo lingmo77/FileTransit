@@ -8,6 +8,7 @@ import time
 from collections import deque
 
 import bcrypt
+from anyio import CapacityLimiter, to_thread
 from fastapi import Request
 
 from .config import settings
@@ -23,7 +24,21 @@ def _prepare(password: str) -> bytes:
 
 
 def hash_password(password: str) -> str:
+    if len(password.encode("utf-8")) > _BCRYPT_MAX_BYTES:
+        raise ValueError("密码 UTF-8 编码不能超过 72 字节")
     return bcrypt.hashpw(_prepare(password), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode("ascii")
+
+
+_password_workers = CapacityLimiter(4)
+
+
+async def hash_password_async(password: str) -> str:
+    return await to_thread.run_sync(hash_password, password, limiter=_password_workers)
+
+
+async def verify_password_async(password: str, password_hash: str) -> bool:
+    # 旧哈希保持原有 72 字节验证方式，避免已有长口令无法登录。
+    return await to_thread.run_sync(verify_password, password, password_hash, limiter=_password_workers)
 
 
 def verify_password(password: str, password_hash: str) -> bool:
@@ -41,6 +56,8 @@ def password_problem(password: str) -> str | None:
         return "密码至少需要 8 位"
     if len(password) > 128:
         return "密码过长（最多 128 位）"
+    if len(password.encode("utf-8")) > _BCRYPT_MAX_BYTES:
+        return "密码 UTF-8 编码不能超过 72 字节（中文等字符占多个字节）"
     if password.isdigit() or password.isalpha():
         return "密码需同时包含字母和数字"
     return None
@@ -95,11 +112,24 @@ class RateLimiter:
     密码爆破与邮件轰炸，不追求全局精确（那需要 Redis，与单机 SQLite 的定位不符）。
     """
 
-    def __init__(self, max_events: int, window_seconds: float, *, enabled: bool = True) -> None:
+    def __init__(self, max_events: int, window_seconds: float, *, enabled: bool = True,
+                 max_keys: int = 10000) -> None:
         self.max_events = max_events
         self.window = window_seconds
         self.enabled = enabled
         self._hits: dict[str, deque[float]] = {}
+        self.max_keys = max_keys
+        self._sweep_at = 0.0
+
+    def _sweep(self, now: float, *, force: bool = False) -> None:
+        if not force and now < self._sweep_at:
+            return
+        self._sweep_at = now + min(30.0, max(0.1, self.window))
+        for key, bucket in list(self._hits.items()):
+            while bucket and now - bucket[0] > self.window:
+                bucket.popleft()
+            if not bucket:
+                del self._hits[key]
 
     def _prune(self, key: str, now: float) -> deque[float]:
         bucket = self._hits.get(key)
@@ -115,16 +145,21 @@ class RateLimiter:
         if not self.enabled:
             return True
         now = time.monotonic()
+        self._sweep(now)
+        if key not in self._hits and len(self._hits) >= self.max_keys:
+            return False  # 定期清扫之外直接拒绝，避免满容量时每个新键都全表扫描
         bucket = self._prune(key, now)
         if len(bucket) >= self.max_events:
             return False
         bucket.append(now)
-        if len(self._hits) > 10000:  # 防止字典无限增长
-            self._hits = {k: v for k, v in self._hits.items() if v}
         return True
 
     def retry_after(self, key: str) -> int:
-        bucket = self._prune(key, time.monotonic())
+        now = time.monotonic()
+        self._sweep(now)
+        if key not in self._hits:
+            return max(1, int(self.window) + 1) if len(self._hits) >= self.max_keys else 0
+        bucket = self._prune(key, now)
         if not bucket:
             return 0
         return max(1, int(self.window - (time.monotonic() - bucket[0])) + 1)

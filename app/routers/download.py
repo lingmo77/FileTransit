@@ -18,13 +18,13 @@ from __future__ import annotations
 import logging
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
 
-from ..core.database import SessionLocal, get_db
+from ..core.database import SessionLocal
 from ..core.deps import AuthContext, get_auth
 from ..core.security import client_ip, user_agent
 from ..models import FileItem
@@ -127,8 +127,8 @@ async def _build_response(
 
     headers = {
         "Accept-Ranges": "bytes",
-        # 文件内容不可变（重名会换 public_id），可以放心长缓存
-        "Cache-Control": "public, max-age=31536000, immutable",
+        # 内容不可变，但权限、游客策略和有效期都可撤回；每次请求都要重新鉴权。
+        "Cache-Control": "private, no-store",
         # ETag 只能是 RFC 7232 的 opaque-tag：双引号内允许的字符集（etagc）
         # 排除空格、双引号和逗号。这里只放 public_id 与 size，两者都只含
         # [A-Za-z0-9_-] 和数字，天然合法；同一个 public_id 的内容永不改变，
@@ -165,11 +165,17 @@ async def _build_response(
 async def download_direct(
     public_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
-    auth: AuthContext | None = Depends(get_auth),
 ) -> FileResponse:
-    item, _ = await _resolve_item(db, public_id, auth)
-    return await _build_response(request, item, user_id=auth.user.id if auth else None)
+    return await _serve_download(request, public_id)
+
+
+async def _serve_download(request: Request, public_id: str) -> FileResponse:
+    # 鉴权和元数据只在短会话中读取，退出后才开始发送 FileResponse。
+    async with SessionLocal() as db:
+        auth = await get_auth(request, db)
+        item, _ = await _resolve_item(db, public_id, auth)
+        response = await _build_response(request, item, user_id=auth.user.id if auth else None)
+    return response
 
 
 @router.api_route(
@@ -179,12 +185,9 @@ async def download_named(
     public_id: str,
     filename: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
-    auth: AuthContext | None = Depends(get_auth),
 ) -> FileResponse:
     """带文件名后缀的直链，方便下载器识别类型。
 
     URL 里的 ``filename`` 只是给下载器看的装饰，真正的文件名一律取自数据库。
     """
-    item, _ = await _resolve_item(db, public_id, auth)
-    return await _build_response(request, item, user_id=auth.user.id if auth else None)
+    return await _serve_download(request, public_id)

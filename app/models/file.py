@@ -33,7 +33,7 @@ class FileItem(Base):
 
     download_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_public: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    #: 软删除标记；清理任务会物理删除文件与记录
+    #: 软删除/清理认领标记；提交后禁止续期，清理失败可在后续维护中重试
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     #: 记录该文件的下载是否被计入日志（站点设置可关闭匿名下载日志）
     uploaded_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,93 +62,101 @@ async def _resolve_expiry(
         ) from None
 
 
+def _upload_options(values) -> tuple[int, bool]:
+    try:
+        hours = int(values.get("expires_hours", 72))
+        public = str(values.get("is_public", "true")).lower()
+        if not 0 <= hours <= 24 * 3650 or public not in {"true", "false"}:
+            raise ValueError
+        return hours, public == "true"
+    except (TypeError, ValueError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传参数不合法") from None
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def upload_file(
     request: Request,
-    file: UploadFile = File(...),
-    expires_hours: int = Form(72),
-    is_public: bool = Form(True),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(require_user),
     _csrf: None = Depends(check_csrf),
 ) -> JSONResponse:
+    from ..services.incoming import IncomingUpload
+    from ..services.upload_slots import UploadBusy, receive_slot
+
     if not upload_limiter.check(str(auth.user.id)):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "上传过于频繁，请稍后再试")
-
     cfg = await settings_service.template_settings(db)
-    site_limit = int(cfg["max_upload_mb"]) * 1024 * 1024
-
-    # 明知会超限时提前拒绝，省掉整段上传
-    declared = getattr(file, "size", None)
-    if declared is not None and declared > site_limit:
-        raise HTTPException(
-            status.HTTP_413_CONTENT_TOO_LARGE,
-            f"文件超过单文件上限 {human_size(site_limit)}",
-        )
-
-    quota = await quota_service.resolve_quota(db, auth.user)
+    site_limit = int(cfg["max_upload_mb"]) * 1024**2
+    expires_hours, is_public = _upload_options(request.query_params)
+    expires_at = await _resolve_expiry(db, expires_hours, auth)
+    try:
+        upload = IncomingUpload(request, max_bytes=site_limit)
+    except storage.StorageError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    try:
+        declared = int(request.headers["content-length"]) if "content-length" in request.headers else None
+        if declared is not None and declared < 0:
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请求体长度不合法") from None
+    overhead = 65536 if upload.multipart else 0
+    if declared is not None and declared > site_limit + overhead:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, f"文件超过单文件上限 {human_size(site_limit)}")
+    try:
+        quota = await quota_service.ensure_can_upload(db, auth.user, 0 if upload.multipart else (declared or 0))
+    except quota_service.QuotaExceeded as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, exc.message) from exc
     remaining = quota.remaining_bytes
     limit = site_limit if remaining is None else min(site_limit, remaining)
-
-    if remaining is not None and remaining <= 0:
+    if limit <= 0:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "存储空间已用尽，请先删除部分文件")
-
-    # 必须在落盘之前：普通用户传 expires_hours=0 会在这里被拒，
-    # 放到 store_upload 之后就会在磁盘上留下没有数据库记录的孤儿文件
-    expires_at = await _resolve_expiry(db, expires_hours, auth)
-
+    if declared is not None:
+        limit = min(limit, declared)
+    # 接收文件时不占数据库连接；鉴权在读取正文之前已完成。
+    await db.close()
     try:
-        stored = await storage.store_upload(file, max_bytes=limit)
+        with receive_slot(auth.user.id, min(declared if declared is not None else limit, limit)):
+            return await _finish_upload(request, db, auth, upload, limit, expires_hours, is_public, expires_at)
+    except UploadBusy as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc), headers={"Retry-After": "3"}) from exc
+
+
+async def _finish_upload(request, db, auth, upload, limit, expires_hours, is_public, expires_at):
+    try:
+        stored = await storage.store_upload(upload, max_bytes=limit)
     except storage.UploadTooLarge as exc:
-        raise HTTPException(
-            status.HTTP_413_CONTENT_TOO_LARGE,
-            f"文件超过允许的体积（本次上限 {human_size(exc.limit)}）",
-        ) from exc
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, f"文件超过允许的体积（本次上限 {human_size(exc.limit)}）") from exc
     except storage.StorageError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
-    original_name = storage.safe_filename(file.filename or "unnamed")
     try:
-        # 落盘之后再复核一次配额，避免并发上传把用量撑爆
-        await quota_service.ensure_can_upload(db, auth.user, stored.size)
-    except quota_service.QuotaExceeded as exc:
+        if upload.multipart:
+            expires_hours, is_public = _upload_options(upload.fields)
+            expires_at = await _resolve_expiry(db, expires_hours, auth)
+        original_name = storage.safe_filename(upload.filename)
+        item = FileItem(
+            public_id=new_token(8), user_id=auth.user.id,
+            original_name=original_name, stored_path=stored.rel_path, size=stored.size,
+            mime_type=storage.guess_mime(original_name), sha256=stored.sha256,
+            is_public=is_public, uploaded_ip=client_ip(request), expires_at=expires_at,
+        )
+        await quota_service.consume(db, auth.user.id, stored.size)
+        db.add(item)
+        await db.commit()
+    except BaseException as exc:
+        await db.rollback()
         await storage.delete_object(stored.rel_path)
-        raise HTTPException(status.HTTP_403_FORBIDDEN, exc.message) from exc
-
-    item = FileItem(
-        public_id=new_token(8),
-        user_id=auth.user.id,
-        original_name=original_name,
-        stored_path=stored.rel_path,
-        size=stored.size,
-        mime_type=storage.guess_mime(original_name),
-        sha256=stored.sha256,
-        is_public=is_public,
-        uploaded_ip=client_ip(request),
-        expires_at=expires_at,
-    )
-    db.add(item)
-    await quota_service.consume(db, auth.user.id, stored.size)
-    await db.commit()
+        if isinstance(exc, quota_service.QuotaExceeded):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, exc.message) from exc
+        raise
     await db.refresh(item)
-
     await log_activity(
-        action=Action.UPLOAD,
-        user=auth.user,
-        request=request,
-        target_type="file",
-        target_id=item.id,
-        detail={
-            "filename": original_name,
-            "size": stored.size,
-            "sha256": stored.sha256,
-            "expires_hours": (
-                files_service.FOREVER_LABEL if expires_at is None else expires_hours
-            ),
-            "is_public": is_public,
-        },
+        action=Action.UPLOAD, user=auth.user, request=request,
+        target_type="file", target_id=item.id,
+        detail={"filename": original_name, "size": stored.size, "sha256": stored.sha256,
+                "expires_hours": files_service.FOREVER_LABEL if expires_at is None else expires_hours,
+                "is_public": is_public},
     )
-
     return JSONResponse({"ok": True, "file": _serialize(item)}, status_code=201)
 
 
@@ -160,16 +168,16 @@ async def delete_file(
     auth: AuthContext = Depends(require_user),
     _csrf: None = Depends(check_csrf),
 ) -> JSONResponse:
-    item = await files_service.get_by_id(db, file_id)
+    item = await files_service.get_by_id(db, file_id, include_deleted=True)
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "文件不存在")
     if item.user_id != auth.user.id and not auth.user.is_admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "只能删除自己的文件")
 
-    await storage.delete_object(item.stored_path)
-    await db.delete(item)
-    await quota_service.release(db, item.user_id, item.size)
-    await db.commit()
+    try:
+        await files_service.delete_record(db, item)
+    except files_service.DeletionFailed as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
     await log_activity(
         action=Action.DELETE_FILE,
@@ -198,18 +206,26 @@ async def update_file(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "只能修改自己的文件")
 
     changes: dict[str, object] = {}
+    values: dict[str, object] = {}
     if payload.expires_hours is not None:
-        item.expires_at = await _resolve_expiry(db, payload.expires_hours, auth)
+        values["expires_at"] = await _resolve_expiry(db, payload.expires_hours, auth)
         changes["expires_hours"] = (
-            files_service.FOREVER_LABEL if item.expires_at is None else payload.expires_hours
+            files_service.FOREVER_LABEL if values["expires_at"] is None else payload.expires_hours
         )
     if payload.is_public is not None:
-        item.is_public = payload.is_public
+        values["is_public"] = payload.is_public
         changes["is_public"] = payload.is_public
 
     if not changes:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有需要更新的内容")
 
+    if not await files_service.update_if_available(db, file_id, values, public_id=item.public_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "文件已进入清理，无法修改")
+    if "expires_at" in values:
+        try:
+            await quota_service.ensure_current_usage(db, item.user_id)
+        except quota_service.QuotaExceeded as exc:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, exc.message) from exc
     await db.commit()
     await db.refresh(item)
 

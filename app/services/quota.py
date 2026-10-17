@@ -1,6 +1,6 @@
 """配额校验与用量维护。
 
-口径：只统计**未过期且未删除**的文件。
+口径：统计未过期的有效文件；删除认领记录在物理清理成功前仍占用配额。
 """
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.templating import human_size
@@ -88,7 +88,18 @@ async def ensure_can_upload(db: AsyncSession, user: User, incoming_bytes: int) -
 
 
 async def consume(db: AsyncSession, user_id: int, size: int) -> None:
-    """原子增加用量计数（与文件入库同一事务）。"""
+    """短写事务中串行重算、复核和消费配额，调用方随后入库并提交。
+
+    sync_usage 先取得 SQLite 写锁，直到文件入库一并提交才释放。
+    不能使用请求鉴权时缓存的 User，也不能先添加文件再调用本函数。
+    """
+    await sync_usage(db, user_id)
+    user = await db.get(User, user_id, populate_existing=True)
+    if user is None:
+        raise QuotaExceeded("用户已不存在")
+    if not user.is_active:
+        raise QuotaExceeded("用户已被停用，无法完成上传")
+    await ensure_can_upload(db, user, size)
     await db.execute(
         update(User)
         .where(User.id == user_id)
@@ -108,19 +119,31 @@ async def release(db: AsyncSession, user_id: int, size: int) -> None:
     )
 
 
+async def ensure_current_usage(db: AsyncSession, user_id: int) -> None:
+    """续期把过期文件重新计入配额时，同样不能突破限额。"""
+    await sync_usage(db, user_id)
+    user = await db.get(User, user_id, populate_existing=True)
+    info = await resolve_quota(db, user)
+    if ((not info.unlimited_files and info.used_files > info.max_files)
+            or (not info.unlimited_bytes and info.used_bytes > info.max_bytes)):
+        raise QuotaExceeded("续期后将超过当前配额，请先删除部分文件")
+
+
 async def sync_usage(db: AsyncSession, user_id: int) -> tuple[int, int]:
-    """按实际未过期文件重算用量，用于清理任务与后台修复。
+    """按有效文件及尚未完成物理删除的记录重算用量。
 
     长期有效的文件（``expires_at`` 为 NULL）同样占用配额，必须一并计入，
     否则每次维护跑完用量都会被清零，等于白送配额。
     """
+    # 必须先写后读，防止并发上传或后台重算用旧快照覆盖新用量。
+    # SQLite 的写锁由调用方的 commit/rollback 释放，文件传输不在此事务内。
+    await db.execute(update(User).where(User.id == user_id).values(id=User.id))
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     row = (
         await db.execute(
             select(func.count(FileItem.id), func.coalesce(func.sum(FileItem.size), 0)).where(
                 FileItem.user_id == user_id,
-                FileItem.is_deleted.is_(False),
-                active_clause(now),
+                or_(FileItem.is_deleted.is_(True), active_clause(now)),
             )
         )
     ).one()

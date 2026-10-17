@@ -11,6 +11,7 @@ import mimetypes
 import os
 import shutil
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from uuid import uuid4
 
@@ -112,19 +113,29 @@ async def store_upload(upload: UploadFile, *, max_bytes: int) -> StoredObject:
     return StoredObject(rel_path=rel_path, size=size, sha256=digest.hexdigest())
 
 
-async def delete_object(rel_path: str) -> bool:
-    """删除文件本体；顺带清理空目录。返回是否真的删掉了。"""
+class DeleteResult(Enum):
+    DELETED = "deleted"
+    MISSING = "missing"
+    FAILED = "failed"
+
+    def __bool__(self) -> bool:
+        return self is not DeleteResult.FAILED
+
+
+async def delete_object(rel_path: str) -> DeleteResult:
+    """区分已删除、原本不存在、I/O 或权限失败。"""
     try:
         path = resolve(rel_path)
     except StorageError:
-        return False
+        return DeleteResult.FAILED
 
-    def _remove() -> bool:
-        existed = path.exists()
+    def _remove() -> DeleteResult:
         try:
-            path.unlink(missing_ok=True)
+            path.unlink()
+        except FileNotFoundError:
+            return DeleteResult.MISSING
         except OSError:
-            return False
+            return DeleteResult.FAILED
         # 清理空的上级分片目录，避免目录树无限膨胀
         for parent in (path.parent, path.parent.parent):
             try:
@@ -132,18 +143,18 @@ async def delete_object(rel_path: str) -> bool:
                     parent.rmdir()
             except OSError:
                 break
-        return existed
+        return DeleteResult.DELETED
 
     return await run_in_threadpool(_remove)
 
 
 async def cleanup_tmp_dir(max_age_seconds: int = 24 * 3600) -> int:
-    """清理上传中断残留的临时分片。"""
+    """清理中断残留的临时上传和过期日志导出。"""
     import time
 
     now = time.time()
     removed = 0
-    for entry in settings.tmp_dir.glob("*.part"):
+    for entry in (*settings.tmp_dir.glob("*.part"), *settings.tmp_dir.glob("logs-*.csv")):
         try:
             if now - entry.stat().st_mtime > max_age_seconds:
                 entry.unlink(missing_ok=True)

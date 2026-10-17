@@ -5,11 +5,16 @@ from __future__ import annotations
 import csv
 import io
 import json
+from pathlib import Path
+from uuid import uuid4
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
+from ..core.config import settings
+from ..core.database import SessionLocal
 from ..core.timeutil import DEFAULT_TIMEZONE, local_to_utc, to_local
 from ..models import ActivityLog
 from .activity import ACTION_LABELS
@@ -144,26 +149,27 @@ async def purge_logs(
     return int(result.rowcount or 0)
 
 
-def export_csv(rows: list[ActivityLog], tz_name: str | None = None) -> str:
+def export_csv(rows: list[ActivityLog], tz_name: str | None = None, *, include_header: bool = True) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(
-        [
-            f"时间({tz_name or DEFAULT_TIMEZONE})",
-            "用户",
-            "用户ID",
-            "动作",
-            "结果",
-            "IP",
-            "浏览器",
-            "操作系统",
-            "设备",
-            "方法",
-            "路径",
-            "对象",
-            "详情",
-        ]
-    )
+    if include_header:
+        writer.writerow(
+            [
+                f"时间({tz_name or DEFAULT_TIMEZONE})",
+                "用户",
+                "用户ID",
+                "动作",
+                "结果",
+                "IP",
+                "浏览器",
+                "操作系统",
+                "设备",
+                "方法",
+                "路径",
+                "对象",
+                "详情",
+            ]
+        )
     for row in rows:
         detail = row.detail
         if detail:
@@ -196,6 +202,39 @@ def export_csv(rows: list[ActivityLog], tz_name: str | None = None) -> str:
 async def fetch_for_export(db: AsyncSession, **filters) -> list[ActivityLog]:
     stmt = _filtered(**filters).order_by(ActivityLog.created_at.desc()).limit(EXPORT_LIMIT)
     return list((await db.execute(stmt)).scalars().all())
+
+
+async def export_to_file(tz_name: str, **filters) -> Path:
+    """每批最多 500 条，格式化与磁盘写入在线程池执行；发送时无需持有数据库。"""
+    path = settings.tmp_dir / f"logs-{uuid4().hex}.csv"
+    cursor = None
+    remaining = EXPORT_LIMIT
+    def append(text: str, mode: str = "a") -> None:
+        with path.open(mode, encoding="utf-8", newline="") as handle:
+            handle.write(text)
+    try:
+        await run_in_threadpool(append, "\ufeff" + export_csv([], tz_name), "w")
+        async with SessionLocal() as db:
+            upper_id = (await db.scalar(select(func.max(ActivityLog.id)))) or 0
+        while remaining > 0:
+            stmt = _filtered(**filters).where(ActivityLog.id <= upper_id)
+            if cursor is not None:
+                created_at, row_id = cursor
+                stmt = stmt.where(or_(ActivityLog.created_at < created_at,
+                                      (ActivityLog.created_at == created_at) & (ActivityLog.id < row_id)))
+            stmt = stmt.order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc()).limit(min(500, remaining))
+            async with SessionLocal() as db:
+                rows = list((await db.scalars(stmt)).all())
+            if not rows:
+                break
+            cursor = rows[-1].created_at, rows[-1].id
+            remaining -= len(rows)
+            csv_text = await run_in_threadpool(export_csv, rows, tz_name, include_header=False)
+            await run_in_threadpool(append, csv_text)
+        return path
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
 
 
 __all__ = [
