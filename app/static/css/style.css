@@ -1128,8 +1128,8 @@ select {
 
 .upload-item {
   display: grid;
-  /* 第三列放操作按钮；文件名那列用 minmax(0, 1fr) 才能被压缩出省略号 */
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  /* 名称与状态分行，按钮独占右列，文件名长度不影响状态位置。 */
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px 12px;
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -1139,6 +1139,8 @@ select {
 }
 
 .upload-item .name {
+  grid-column: 1;
+  grid-row: 1;
   font-size: 0.88rem;
   font-weight: 540;
   overflow: hidden;
@@ -1146,21 +1148,49 @@ select {
   white-space: nowrap;
 }
 
-/* 状态里要放「45% · 3.4 MB/s · 剩余 6 分 12 秒」，窄屏上宁可截断也不能把卡片撑破 */
 .upload-item .status {
+  grid-column: 1;
+  grid-row: 2;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 百分比靠左，速度和剩余时间靠右；窄屏放不下时向下一行换行。 */
+.upload-item .status:has(.upload-percent) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px 8px;
+}
+
+.upload-item .upload-percent {
+  flex: 0 0 3.5em;
+  margin-right: auto;
+}
+
+.upload-item .upload-speed,
+.upload-item .upload-eta {
+  flex: 0 0 auto;
+  text-align: right;
   white-space: nowrap;
+}
+
+.upload-item .upload-speed {
+  min-width: 9ch;
 }
 
 /* 「重试 + 取消」成组放进最后一列：重试按钮藏起来时，也不会在网格里
    留下一个空列，白白多出一道 12px 的列间距 */
 .upload-item .upload-actions {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
   display: flex;
   align-items: center;
   gap: 2px;
-  margin: -3px -6px -3px 0;
+  margin: -3px 0;
 }
 
 /* 比通用的 36px 图标按钮小一号，免得抢了文件名的地方 */
@@ -1196,6 +1226,10 @@ select {
   border-radius: inherit;
   background: linear-gradient(90deg, var(--primary), color-mix(in srgb, var(--primary) 60%, #8b5cf6));
   transition: width var(--t) linear;
+}
+
+.upload-item .progress {
+  grid-row: 3;
 }
 
 .upload-item.done .progress > i {
@@ -1767,14 +1801,3 @@ select {
     scroll-behavior: auto !important;
   }
 }
-
-/* 上传名称独占一行，状态列宽与文字长度无关。 */
-.upload-item { grid-template-columns: minmax(0, 1fr) 26px; }
-.upload-item .name { grid-column: 1; grid-row: 1; }
-.upload-item .upload-actions { grid-column: 2; grid-row: 1 / 3; align-self: center; }
-.upload-item .status { grid-column: 1; grid-row: 2; display: grid; grid-template-columns: 3.5em minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; font-variant-numeric: tabular-nums; }
-.upload-item .status > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.upload-item .progress { grid-column: 1 / -1; grid-row: 3; }
-
-.upload-item .status { display: block; }
-.upload-item .status:has(.upload-percent) { display: grid; }
