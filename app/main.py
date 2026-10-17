@@ -42,7 +42,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    version="1.1.2",
+    version="1.1.3",
     lifespan=lifespan,
     # 生产环境不暴露交互式文档，避免泄露内部接口结构
     docs_url="/api/docs" if settings.debug else None,
