@@ -58,10 +58,12 @@ docker compose -f docker-compose.yml ps
 ```dotenv
 FT_ARIA2_BT_PORT=16881
 FT_ARIA2_PACKAGE_VERSION=1.37.0+debian-3
-FT_ARIA2_BLOCKED_NETWORKS=<本站及反向代理自身的实际公网IP/CIDR，逗号分隔>
+FT_ARIA2_BLOCKED_NETWORKS=<网盘服务器及代理实际使用的公网IP，多个用英文逗号分隔>
 ```
 
-`FT_ARIA2_BLOCKED_NETWORKS` 必须填写实际地址，不能使用文档占位值；为空时 Aria2 拒绝启动。公网 IP 或 DDNS 地址变化后须同步修改并重建 Aria2。非公网、回环、Docker 网络等受保护地址由内置出口规则处理。
+**不是固定填写两个 IP。没有反向代理、或网盘与代理共用一个公网 IP 时，只填一个；两者公网 IP 不同时都填，用英文逗号分隔。有多个公网地址或公网 IPv6 时也要一并列出，同一地址不重复填写。**具体示例见 [DEPLOY.md](DEPLOY.md) 第 10.1 节。
+
+该配置是 Aria2 的禁止访问列表，只填实际 IP/CIDR，不填域名、URL、端口、访问者或下载网站的 IP。必须替换为实际地址，不能使用文档占位值；为空时 Aria2 拒绝启动。公网 IP 或 DDNS 地址变化后须同步修改并重建 Aria2。非公网、回环、Docker 网络等受保护地址由内置出口规则处理。
 
 导入两份镜像，使用可选 Aria2 离线下载版包内的单个默认配置：
 
