@@ -71,6 +71,22 @@ class Settings(BaseSettings):
     #: 过期文件清理间隔（分钟）
     cleanup_interval_minutes: int = 10
 
+    # ---- 离线下载（下载引擎运行在独立容器） ----
+    offline_dir: Path | None = None
+    aria2_rpc_url: str = "http://aria2:6800/jsonrpc"
+    aria2_rpc_secret: str = ""
+    aria2_rpc_secret_file: Path | None = None
+    aria2_download_dir: str = "/downloads"
+    offline_poll_seconds: float = 2.0
+
+    @property
+    def offline_root(self) -> Path:
+        return self.offline_dir or self.data_dir / "offline"
+
+    @property
+    def offline_secret_path(self) -> Path:
+        return self.aria2_rpc_secret_file or self.offline_root / "control" / "rpc-secret"
+
     # ---- 默认管理员（首次启动时创建）----
     admin_username: str = "admin"
     admin_password: str = "admin"

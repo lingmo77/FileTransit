@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse
@@ -580,6 +581,37 @@ async def get_settings(db: AsyncSession = Depends(get_db)) -> JSONResponse:
     return JSONResponse({"ok": True, "settings": _mask_settings(values)})
 
 
+@router.get("/offline/status")
+async def offline_status(db: AsyncSession = Depends(get_db)) -> JSONResponse:
+    from ..services.offline_worker import service_status
+    return JSONResponse({"ok": True, "service": await service_status(db)})
+
+
+def _validate_offline_settings(updates: dict) -> None:
+    ranges = {"seed_minutes": (1, 10080), "seed_ratio": (0, 1000),
+              "download_limit_mbps": (0, 1048576), "upload_limit_mbps": (0, 1048576),
+              "global_concurrency": (1, 32), "user_concurrency": (1, 16),
+              "max_tasks_per_user": (1, 1000), "temp_max_mb": (1, 1073741824),
+              "min_free_mb": (0, 1073741824), "metadata_max_mb": (1, 32),
+              "max_torrent_files": (1, 100000)}
+    decimals = {"seed_ratio", "download_limit_mbps", "upload_limit_mbps"}
+    for key, value in list(updates.items()):
+        if not key.startswith("offline."):
+            continue
+        name = key.removeprefix("offline.")
+        if name in {"enabled", "seed_enabled"}:
+            if not isinstance(value, bool):
+                raise HTTPException(400, "离线功能开关必须为布尔值")
+        elif name in ranges:
+            lo, hi = ranges[name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not lo <= value <= hi:
+                raise HTTPException(400, f"离线下载设置 {name} 超出允许范围")
+            if name not in decimals:
+                if int(value) != value:
+                    raise HTTPException(400, f"离线下载设置 {name} 必须为整数")
+                updates[key] = int(value)
+
+
 def _mask_settings(values: dict) -> dict:
     masked = {k: v for k, v in values.items() if k not in settings_service.SECRET_KEYS}
     masked["email.has_password"] = bool(values.get("email.password_enc"))
@@ -612,6 +644,8 @@ async def save_settings(
     if not updates:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有需要保存的设置")
 
+    _validate_offline_settings(updates)
+
     await settings_service.set_many(db, updates, updated_by=auth.user.id)
 
     safe_log = {k: v for k, v in updates.items() if k not in settings_service.SECRET_KEYS}
@@ -623,7 +657,10 @@ async def save_settings(
     )
 
     values = await settings_service.all_values(db, force=True)
-    return JSONResponse({"ok": True, "settings": _mask_settings(values), "message": "设置已保存"})
+    message = "设置已保存"
+    if any(k.startswith("offline.") for k in updates):
+        message = "设置已保存，下载引擎配置将在后台同步；可检查服务状态确认"
+    return JSONResponse({"ok": True, "settings": _mask_settings(values), "message": message})
 
 
 # ------------------------------------------------------------------ 邮件

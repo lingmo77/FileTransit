@@ -1,6 +1,6 @@
 # 文件中转站 · 项目文件说明
 
-适用版本：**file-transfer 1.0**（2026-10-09）
+适用版本：**file-transfer 1.3.0**（2026-10-22）
 
 这份文档回答一个问题：**项目目录里这些东西分别是什么，部署时哪些要传到服务器上。**
 
@@ -8,15 +8,16 @@
 
 ## 0. 一句话结论
 
-**只需要传一个文件**：
+**按需要选择一个安装包**（配置见 `EDITIONS.md`）：
 
 ```
-dist/file-transfer-offline-<日期>.tar.gz     （约 68 MB）
+dist/file-transfer-standard-1.3.0.tar.gz      # 仅文件中转
+dist/file-transfer-with-aria2-1.3.0.tar.gz    # 含可选离线下载
 ```
 
-它由项目根的 `package.sh` 打包，内容是按**显式清单**挑过的——包含下面所有标 ✅ 的项 + 已构建好的镜像，并且已经自动排除了 `.venv`、`data`、`.env`、`dist` 这四个绝不能传的东西。
+它由项目根的 `package.py` 或 `package.sh` 按显式清单打包，标准版包含网盘镜像，增强版包含网盘/Aria2 两份镜像，两者均有源码和通用配置；排除 `.venv`、`data`、`.env`、`dist`。仅上传选定的发布包，不同步整个开发目录。
 
-想要更小的包（目标机器能联网、愿意现场构建）就用 `file-transfer-src-<日期>.tar.gz`（约 135 KB）。
+目标机器能联网并现场构建时，可使用更小的 `file-transfer-src-1.3.0.tar.gz`。包大小和校验值以 Release 附件为准。
 
 ---
 
@@ -24,13 +25,16 @@ dist/file-transfer-offline-<日期>.tar.gz     （约 68 MB）
 
 | 文件 | 是什么 | 要传吗 |
 | --- | --- | --- |
-| `Dockerfile` | 镜像构建文件。两段式：编译器和头文件只留在 builder 阶段，最终镜像里没有它们 | ✅ 必须 |
-| `docker-compose.yml` | 容器编排：端口映射、数据卷、健康检查 | ✅ 必须 |
+| `Dockerfile` | 网盘镜像构建文件，两阶段安装二进制 wheel | ✅ 必须 |
+| `docker-compose.yml` | 标准版网盘编排：端口、数据卷、健康检查 | ✅ 必须 |
+| `docker-compose.aria2.yml` | 增强版完整编排，网盘与 Aria2 在同一文件，单独使用 | 增强版需要 |
+| `EDITIONS.md` | 两种安装包的配置、升级与切换说明 | 📄 建议 |
 | `.dockerignore` | 构建镜像时的排除清单，挡住 `.venv` / `data` / `.env` 进镜像 | ✅ 必须 |
 | `.env.example` | 环境变量模板。服务器上 `cp .env.example .env` 再改密钥 | ✅ 必须 |
 | `requirements.txt` | 运行时 Python 依赖 | ✅ 必须 |
 | `alembic.ini` | 数据库迁移配置，`Dockerfile` 里会 `COPY` 它 | ✅ 必须 |
-| `DEPLOY.md` | 部署实施说明（9 节，从头到尾照着做即可） | 📄 建议 |
+| `DEPLOY.md` | 部署实施说明，第 10 节为 Aria2 配置 | 📄 建议 |
+| `RELEASE_NOTES.md` / `OFFLINE_DOWNLOAD_PLAN.md` | 当前发布内容、实施与验证记录 | 📄 建议 |
 | `FILES.md` | 本文档 | 📄 建议 |
 | `README.md` | 项目简介 | 📄 可选 |
 | `PROJECT.md` | 开发文档：架构、需求、每轮调整记录 | 📄 可选 |
@@ -47,8 +51,8 @@ dist/file-transfer-offline-<日期>.tar.gz     （约 68 MB）
 | --- | --- | --- |
 | `app/` | **应用本体**，见下面第 3 节 | ✅ 必须 |
 | `migrations/` | Alembic 迁移脚本 | ✅ 必须 |
-| `docker/` | 只有一个 `entrypoint.sh`（容器启动入口） | ✅ 必须 |
-| `tests/` | 测试代码，55 条用例 | ❌ 运行不需要 |
+| `docker/` | 网盘 `entrypoint.sh`，以及 `aria2/` 独立引擎镜像、网络出口过滤和磁盘监测 | ✅ 必须 |
+| `tests/` | 自动化测试及隔离联调脚本，188 项 pytest 回归 | ❌ 运行不需要 |
 | `data/` | **本地开发用的 SQLite 库**（`app.db`） | ⛔ 绝不能传 |
 | `dist/` | 打包产物本身（就是上面那两个 tar.gz） | ❌ 不用 |
 | `.venv/` | **Windows 本地虚拟环境**，几百 MB，Windows 二进制 | ⛔ 绝不能传 |
@@ -82,17 +86,20 @@ dist/file-transfer-offline-<日期>.tar.gz     （约 68 MB）
 ## 4. 上传与更新步骤
 
 ```bash
-# 1) 上传 file-transfer-offline-<日期>.tar.gz，在服务器上解开
-tar xzf file-transfer-offline-2026-10-09.tar.gz -C /tmp
+# 1) 上传标准版安装包，在服务器上解开；增强版步骤见 EDITIONS.md
+tar xzf file-transfer-standard-1.3.0.tar.gz -C /tmp
 
 # 2) 覆盖代码（.env 不在包里，服务器上原有的不会被覆盖）
-cd /home/docker/file-transfer
+cd /opt/file-transfer
 tar cf - -C /tmp/file-transfer \
     app migrations docker Dockerfile docker-compose.yml \
     alembic.ini requirements.txt .env.example | tar xf -
 
-# 3) 重建并重启
-docker compose up -d --build
+# 3) 标准版只加载网盘镜像；已有覆盖文件要继续使用
+docker load -i /tmp/file-transfer/images/file-transfer-1.0.tar
+docker compose -f docker-compose.yml config --quiet
+docker compose -f docker-compose.yml up -d --no-build
+# 增强版使用 with-aria2 安装包，包内默认 Compose 已包含两个服务，按 EDITIONS.md 启动。
 ```
 
 > ⚠️ **只 `docker compose build` 而不跟 `up -d` 会留下不一致状态**：标签已指向新镜像，但运行中的容器仍绑在旧镜像 ID 上，`docker system df` 会把它算成 300 MB 左右「可回收」。补一次 `up -d` 即可对齐。详见 `DEPLOY.md` §8。
@@ -116,7 +123,7 @@ find app migrations docker tests -type f ! -name '*.pyc' ! -path '*__pycache__*'
 在**服务器**上跑（同一份清单文件名，排除 `images/`、`.env` 等服务器专有项）：
 
 ```bash
-cd /home/docker/file-transfer
+cd /opt/file-transfer
 find app migrations docker tests -type f ! -name '*.pyc' ! -path '*__pycache__*' \
   | sort | xargs sha256sum | sort -k2 > /tmp/remote_manifest.txt
 ```
@@ -128,3 +135,5 @@ find app migrations docker tests -type f ! -name '*.pyc' ! -path '*__pycache__*'
 - `.env`（密钥，本地没有）
 - `images/`（离线包解出来的镜像 tar，本地在 `dist/` 里）
 - `data/`（如果用 `docker compose` 挂在项目目录的话；本项目数据在命名卷 `file-transfer_ft-data` 里，不落在这里）
+
+新增离线下载后还会有 `ft-offline`（共享暂存/密钥）和 `ft-aria2-state`（仅引擎状态）命名卷。原有 `ft-data` 保持原名和内容。源码包包含可选 `docker/aria2/`；标准版只需要网盘镜像，增强版才需要 Aria2 镜像，并使用包含两个服务的单个 Compose 文件。具体命令见 `EDITIONS.md`。

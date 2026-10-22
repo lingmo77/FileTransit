@@ -31,7 +31,7 @@
         root.dataset.theme = stored === 'dark' ? 'dark' : 'light';
       })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=10" />
+    <link rel="stylesheet" href="/static/css/style.css?v=11" />
     {% block head %}{% endblock %}
   </head>
 
@@ -52,6 +52,14 @@
               href="/dashboard"
               >我的文件</a
             >
+
+            {% if cfg.offline_enabled %}
+            <a
+              class="nav-link {% if request.url.path.startswith('/offline') %}active{% endif %}"
+              href="/offline"
+              >离线下载</a
+            >
+            {% endif %}
 
             <div class="dropdown" data-dropdown>
               <button

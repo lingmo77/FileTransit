@@ -108,6 +108,9 @@ async def purge_expired_files(*, batch_size: int = 500) -> int:
             for item in files:
                 if not await claim_expired_file(db, item.id, now, public_id=item.public_id):
                     continue  # 用户已先续期成功，不能删除查询时的旧快照
+                from .offline_worker import file_removed
+                await file_removed(db, item.id)
+                await db.commit()
                 affected_users.add(item.user_id)
                 try:
                     removed = await storage.delete_object(item.stored_path)

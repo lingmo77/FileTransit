@@ -14,10 +14,12 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 tests/
+dist/
 
 .env
 .env.example
 docker-compose.yml
+docker-compose.aria2.yml
 Dockerfile
 .dockerignore
 *.md

@@ -76,6 +76,13 @@ async def delete_user(db: AsyncSession, user: User) -> tuple[int, int]:
     user.is_active = False
     await db.commit()
 
+    from .offline_worker import cancel_user_tasks
+    from .aria2_rpc import Aria2Error
+    try:
+        await cancel_user_tasks(user.id)
+    except Aria2Error as exc:
+        raise files_service.DeletionFailed(str(exc)) from None
+
     files = (
         (await db.execute(select(FileItem).where(FileItem.user_id == user.id)))
         .scalars()

@@ -1,7 +1,7 @@
 # 构建：docker build -t file-transfer:1.0 .
 # 运行：docker run -d -p 8000:8000 -v ft-data:/app/data file-transfer:1.0
 #
-# 采用两段式构建：编译器和头文件只留在 builder 阶段，最终镜像里没有它们。
+# 采用两段式构建：builder 安装锁定的二进制 wheel，最终只复制虚拟环境。
 #
 # 这里刻意不写 `# syntax=docker/dockerfile:1`：本文件只用标准指令，
 # 不写就不必额外拉取 BuildKit 前端镜像，在受限网络里少一次失败点。
@@ -12,18 +12,13 @@ FROM python:3.12-slim AS builder
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# 少数依赖（如没有对应 wheel 的平台）需要现场编译
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /build
 
 # 先只拷贝依赖清单，让这一层能被缓存
 COPY requirements.txt ./
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install -r requirements.txt
+    && /opt/venv/bin/pip install --only-binary=:all: -r requirements.txt
 
 # ---------------------------------------------------------------- 运行阶段
 FROM python:3.12-slim AS runtime

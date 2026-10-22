@@ -39,6 +39,9 @@ class Action:
     ADMIN_SETTINGS_UPDATE = "admin_settings_update"
     ADMIN_SMTP_TEST = "admin_smtp_test"
     ADMIN_LOGS_PURGE = "admin_logs_purge"
+    OFFLINE_CREATE = "offline_create"
+    OFFLINE_ACTION = "offline_action"
+    OFFLINE_SAVED = "offline_saved"
 
 
 ACTION_LABELS: dict[str, str] = {
@@ -60,6 +63,9 @@ ACTION_LABELS: dict[str, str] = {
     Action.ADMIN_SETTINGS_UPDATE: "管理-修改设置",
     Action.ADMIN_SMTP_TEST: "管理-测试邮件",
     Action.ADMIN_LOGS_PURGE: "管理-清空日志",
+    Action.OFFLINE_CREATE: "创建离线任务",
+    Action.OFFLINE_ACTION: "管理离线任务",
+    Action.OFFLINE_SAVED: "离线文件保存",
 }
 
 # ------------------------------------------------------------------ UA 解析

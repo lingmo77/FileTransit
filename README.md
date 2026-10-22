@@ -5,6 +5,13 @@
 - 后端：FastAPI + SQLAlchemy 2（异步）+ SQLite（WAL）
 - 前端：Jinja2 服务端渲染 + 原生 CSS/JS，无 Node 构建步骤
 - 部署：Docker / Docker Compose；开发环境用 Python 虚拟环境
+- 离线下载：独立任务页，支持 HTTP/HTTPS、磁力和 BT 种子；默认私密、入库后保留 14 天。Aria2 独立容器，后台配置做种策略及全局上下行限速。
+
+当前版本：**1.3.0**。发布内容及升级说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+
+提供**标准版（仅文件中转）**与**增强版（含可选 Aria2 离线下载）**，安装包及两种配置见 [EDITIONS.md](EDITIONS.md)。默认 Compose 只启动网盘，标准版不需要配置或运行 Aria2。
+
+增强版使用同时包含网盘与 Aria2 的完整 Compose 文件（源码中为 `docker-compose.aria2.yml`，增强版安装包中已作为 `docker-compose.yml`），填写 `FT_ARIA2_BLOCKED_NETWORKS`，列出本站及反向代理自身公网 IP/CIDR，并在管理后台开启离线下载。留空时 Aria2 拒绝启动。公网 IP 变化后同步更新并重建下载容器。
 - 默认管理员：`admin` / `admin`（首次登录后必须改密）
 
 设计与需求细节见 [PROJECT.md](PROJECT.md)。
@@ -52,12 +59,21 @@ pytest              # 或 pytest -q
 cp .env.example .env
 # 必须修改 .env 里的 FT_SECRET_KEY：
 #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+# 修改默认管理员口令。此处只启动标准版，不需要 Aria2。
 
 docker compose up -d --build
 docker compose logs -f app
 ```
 
 打开 `http://<服务器IP>:8000`。
+
+可选增强版：在 `.env` 配置 `FT_ARIA2_BLOCKED_NETWORKS`，再运行：
+
+```bash
+docker compose -f docker-compose.aria2.yml up -d --build
+```
+
+服务健康后在后台开启离线下载。此命令只使用一个完整配置文件；增强版安装包已将它命名为 `docker-compose.yml`，直接 `docker compose up -d --no-build` 即可。完整步骤见 [EDITIONS.md](EDITIONS.md)。
 
 数据（SQLite 数据库 + 上传的文件）全部在命名卷 `ft-data` 里，容器重建不丢数据：
 
@@ -197,13 +213,11 @@ data/                  运行时数据（数据库 + 上传文件，已被 .giti
 # 查看日志
 docker compose logs -f --tail=200 app
 
-# 备份数据卷
-docker run --rm -v ft-data:/data -v "$PWD:/backup" alpine \
-  tar czf /backup/ft-data-$(date +%F).tar.gz -C /data .
-
 # 直接查数据库（日志也可以直接用 SQL 查，需求 4）
 sqlite3 data/app.db "select created_at, username, action, ip_address, browser from activity_logs order by id desc limit 20;"
 
 # 手动触发一次过期清理（也可在后台点「立即执行维护」）
 docker compose exec app python -c "import asyncio; from app.services import cleanup; print(asyncio.run(cleanup.run_maintenance()))"
 ```
+
+更新直接覆盖必要代码，不自动创建生产备份；保留现有数据库、用户文件、卷、`.env` 和密钥。离线服务的网络限制、端口、卷和双镜像打包见 [部署说明第 10 节](DEPLOY.md#10-aria2-离线下载服务)。

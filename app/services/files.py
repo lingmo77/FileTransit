@@ -204,6 +204,9 @@ async def delete_record(db: AsyncSession, item: FileItem) -> None:
     await db.commit()
     if not result.rowcount:
         return  # 原文件已被别的请求删除；不能操作复用该数字编号的新文件
+    from .offline_worker import file_removed
+    await file_removed(db, item.id)
+    await db.commit()
     try:
         result = await storage.delete_object(item.stored_path)
         if not result:

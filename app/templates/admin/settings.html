@@ -198,6 +198,36 @@
       </div>
     </section>
 
+    <!-- 离线下载 -->
+    <section class="card" style="margin-bottom:18px" id="offline-settings">
+      <div class="card-head"><h2>{{ icon('download', 17) }} 离线下载</h2><span class="tiny muted">设置保存后由下载服务同步生效</span></div>
+      <div class="card-body">
+        <p class="small muted">可选功能：需先按部署说明启动独立 Aria2 容器；仅使用标准版时保持关闭。开启后导航才显示离线下载入口。</p>
+        <div class="offline-admin-status small"><span class="badge" id="offline-admin-status" role="status">正在检查下载服务…</span><button type="button" class="btn btn-sm" id="offline-admin-refresh">检查连接</button></div>
+        <label class="checkbox" style="margin-bottom:14px"><input type="checkbox" name="offline.enabled" {% if values.get('offline.enabled', false) %}checked{% endif %} /><span>启用离线下载<span class="tiny muted" style="display:block">用户在独立任务页创建下载任务，默认不公开、保存 14 天</span></span></label>
+        <label class="checkbox" style="margin-bottom:18px"><input type="checkbox" name="offline.seed_enabled" {% if values.get('offline.seed_enabled', false) %}checked{% endif %} /><span>下载完成后继续做种<span class="tiny muted" style="display:block">默认关闭。关闭时会停止已有的完成后做种；开启不会重新启动已结束任务</span></span></label>
+        <div class="form-grid">
+          <div class="field"><label for="offline-download-limit">全局下载限速（MB/s）</label><input type="number" id="offline-download-limit" name="offline.download_limit_mbps" data-type="float" min="0" step="0.01" value="{{ values.get('offline.download_limit_mbps', 0) }}" /><span class="help">所有离线任务合计；0 表示不限速</span></div>
+          <div class="field"><label for="offline-upload-limit">全局上传限速（MB/s）</label><input type="number" id="offline-upload-limit" name="offline.upload_limit_mbps" data-type="float" min="0" step="0.01" value="{{ values.get('offline.upload_limit_mbps', 0) }}" /><span class="help">作用于 BT 下载中的上传和完成后做种；0 表示不限速</span></div>
+          <div class="field"><label for="offline-seed-minutes">最长做种时间（分钟）</label><input type="number" id="offline-seed-minutes" name="offline.seed_minutes" data-type="int" min="1" max="10080" value="{{ values.get('offline.seed_minutes', 60) }}" /><span class="help">仅在继续做种开启时使用；达到时长或分享率任一条件即停止</span></div>
+          <div class="field"><label for="offline-seed-ratio">做种分享率目标</label><input type="number" id="offline-seed-ratio" name="offline.seed_ratio" data-type="float" min="0" step="0.1" value="{{ values.get('offline.seed_ratio', 1.0) }}" /><span class="help">上传量 / 下载量；0 表示只按最长时间停止</span></div>
+          {% set offline_numbers = [
+            ('global_concurrency', '全站同时下载任务数', 3, 1, 32, '已暂停和等待选择的任务不占下载并发'),
+            ('user_concurrency', '每用户同时下载任务数', 1, 1, 16, '同时受全站下载并发约束'),
+            ('max_tasks_per_user', '每用户未结束任务上限', 20, 1, 1000, '防止大量排队任务长期占用资源'),
+            ('temp_max_mb', '离线暂存预算（MB）', 40960, 1, 10485760, '包括下载、导入副本和继续做种的源文件'),
+            ('min_free_mb', '磁盘最低可用空间（MB）', 1024, 0, 10485760, '低于此值暂停任务，保护现有网盘存储'),
+            ('metadata_max_mb', 'BT 种子大小上限（MB）', 5, 1, 32, '限制种子上传及元数据解析大小'),
+            ('max_torrent_files', '单个 BT 资源文件数上限', 1000, 1, 100000, '解析时生效；所选成品仍受用户文件配额限制')
+          ] %}
+          {% for key, label, fallback, minimum, maximum, help in offline_numbers %}
+            <div class="field"><label for="offline-{{ key }}">{{ label }}</label><input type="number" id="offline-{{ key }}" name="offline.{{ key }}" data-type="int" min="{{ minimum }}" max="{{ maximum }}" value="{{ values.get('offline.' ~ key, fallback) }}" /><span class="help">{{ help }}</span></div>
+          {% endfor %}
+        </div>
+        <p class="tiny muted" style="margin:0">默认停止做种只作用于下载完成后的阶段；BT 下载过程中仍可能上传数据。继续做种会保留一份下载源副本并占用暂存空间。</p>
+      </div>
+    </section>
+
     <!-- 日志 -->
     <section class="card" style="margin-bottom: 18px">
       <div class="card-head"><h2>{{ icon('list', 17) }} 日志</h2></div>

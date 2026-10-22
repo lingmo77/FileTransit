@@ -176,6 +176,16 @@ async def reset_page(
 # ------------------------------------------------------------------ 用户中心
 
 
+@router.get("/offline", response_class=HTMLResponse)
+async def offline_downloads(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(require_user_page),
+) -> HTMLResponse:
+    context = await page_context(request, db, auth)
+    return templates.TemplateResponse(request, "offline.html", context)
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(
     request: Request,

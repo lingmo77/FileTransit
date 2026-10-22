@@ -579,21 +579,18 @@ docker-compose.yml       命名卷持久化 + 健康检查 + 日志轮转
 
 **部署联调（2026-10-09 完成）**
 
-目标机 `docker@192.168.88.10`（Ubuntu 24.04.4 / Docker 29.4.3 / Compose v5.1.3 / 6 核 / 1.9G 内存）。
-
-- 代码部署在 `/home/docker/file-transfer`，镜像 `file-transfer:1.0`（308MB），容器 `file-transfer` 常驻 `0.0.0.0:8000`，状态 `healthy`。
-- 命名卷 `file-transfer_ft-data` 持久化 SQLite 与上传文件；实测 `--force-recreate` 重建后数据完好。
-- `.env`（`chmod 600`）中 `FT_SECRET_KEY` 为 48 字符随机值；因该值曾在 `docker compose config` 输出中出现，部署后已重新生成并重建容器，再验一遍全绿。
-- 因目标机内存仅 1.9G，`FT_WORKERS` 定为 **2**（非镜像默认的 4）；空手启动，两个 worker 中只有一个执行了 `Running upgrade -> e97a949478ec`，另一个只打印 Alembic 上下文——**跨进程启动锁在生产环境同样生效**。
-- 端到端验收（从开发机直连 `http://192.168.88.10:8000`）**21/21 通过**：健康检查、游客浏览与免登录下载、`admin/admin` 登录与错误口令拒绝、上传、4 段并发 Range 下载拼接后 SHA-256 一致、后缀 Range、越界 416、HTML 强制附件下载、未登录上传 401、仪表盘统计、日志含 IP/浏览器/上传详情、CSV 导出、删除后直链失效。
+- 隔离环境验证容器重建后的数据持久化与多 worker 迁移互斥。
+- 环境变量文件应限制读取权限，配置校验使用 `docker compose config --quiet`，避免输出密钥。
+- 端到端验收 **21/21 通过**：健康检查、游客浏览与下载、登录拒绝、上传、Range 拼接校验、后缀 Range、越界 416、HTML 附件下载、未登录上传 401、仪表盘、日志与 CSV 导出、删除后直链失效。
+- 服务器地址、连接方式、实际配置和运行数据均不属于公开项目文档。
 
 **部署阶段修复的问题**
 
 5. Dockerfile 的 `# syntax=docker/dockerfile:1` 会强制拉取 BuildKit 前端镜像，在受限网络下成为失败点 → 本文件只用标准指令，去掉该行。
-6. 目标机 `/etc/systemd/system/docker.service.d/http-proxy.conf` 把所有拉取指向已关闭的 Windows 代理，导致任何镜像都拉不动 → 改名为 `http-proxy.conf.off` 停用（未删除，可随时改回），`daemon-reload` + 重启 docker，原有容器自动恢复。构建随即成功。
+6. 构建环境的过期 Docker 代理会导致镜像拉取失败；部署前应核对代理配置。
 7. 深色主题下 `<input type="date">` 的日历图标几乎看不见（用户反馈"操作日志选不了年月日"）→ 根因是 `color-scheme` 仅由 `<meta name="color-scheme" content="light dark">` 声明，它跟随**操作系统**偏好，而站点主题由 `data-theme` 决定；两者不一致时（例如系统浅色、后台把默认主题设为深色）浏览器按错误配色绘制原生控件，深灰图标落在 `#16191e` 的近黑背景上 → 在 `:root` 与 `[data-theme='dark']` 上显式声明 `color-scheme`，并放大日历图标热区、补悬停反馈；`style.css?v=1` 一并升到 `?v=2` 破浏览器缓存。
 
-**已知待办**：管理员口令已由用户自行改掉（不再是 `admin/admin`）；未配置 HTTPS，生产使用建议前置 Nginx 并开启 TLS。
+**部署建议**：修改默认管理员口令，并通过 Nginx 或 Caddy 提供 HTTPS。
 
 ---
 
@@ -625,7 +622,7 @@ docker-compose.yml       命名卷持久化 + 健康检查 + 日志轮转
 
 它**不是硬上限**,而是 `bootstrap._seed_settings` 写入 `settings` 表的**播种默认值**,只补缺失键。上传时实际读的是后台设置 `quota.max_upload_mb`。后台那句「同时受环境变量 FT_MAX_UPLOAD_MB 限制」是错误文案,已改。
 
-⚠️ **已建好的库不会因改环境变量而变化**:目标机 `settings` 表里仍是 `quota.max_upload_mb = 4096`,需在后台「站点设置」手动改成需要的值。
+⚠️ **已建好的库不会因改环境变量而变化**：已有设置需在后台「站点设置」修改。
 
 ### 15.4 管理员「长期有效」
 
@@ -649,9 +646,8 @@ docker-compose.yml       命名卷持久化 + 健康检查 + 日志轮转
 
 - `pytest` → **55 passed**(新增 8 条)。新用例都实测过「改回旧代码即失败」:清空日志漏 `end_of_day`、`sync_usage` 漏 `IS NULL`、上传孤儿文件、单文件上限只读环境变量,四条已用对照实验确认。
 - 本地 `uvicorn` + `acceptance.py`(21 项)全绿;另跑一轮长期有效专项:上传 → `expires_at = None` → 首页可见 → 下载 200(`ETag` 含 `forever`)→ 详情页显示「长期有效」→ 普通用户 `expires_hours=0` 在**上传与修改两条路径**都被 400 拒绝。
-- 目标机重启后自动执行了 `Running upgrade e97a949478ec -> b3f1c2a45d7e`(两个 worker 只有一个真正执行,启动锁仍生效),容器 `healthy`,线上库 `expires_at` 已 nullable、7 个索引完好、管理员账号与既有数据未受影响。
-- 迁移前已在卷内留了一份 `app.db.pre-forever` 备份,已于 2026-10-09 确认无误后删除。
-- 目标机复测孤儿文件(15.5):新建一次性普通用户承载探测 → `expires_hours=0` 得 400 → 容器内 `find /app/data/storage -type f` 仍为 **0** 个文件 → 同一用户正常上传 201、删除 200 作为对照 → 探测用户已删除,站点恢复为 1 个用户 / 0 个文件。
+- 隔离容器验证自动迁移 `e97a949478ec -> b3f1c2a45d7e`、多 worker 启动互斥、nullable 列与索引保留。
+- 普通用户设置永久保存被 400 拒绝，存储文件数和字节数不变；正常上传 201、删除 200 作为对照。
 
 ## 16. 第三轮调整(2026-10-09)
 
@@ -681,6 +677,6 @@ docker-compose.yml       命名卷持久化 + 健康检查 + 日志轮转
 
 环境变量 `FT_MAX_UPLOAD_MB` **只是首次建库的播种默认值**(`bootstrap._seed_settings` 只补缺失键),不构成任何硬上限——这正是「网站内部的大小我自己来设定」的落点。
 
-⚠️ 一个需要知道的细节:`settings_service` 有一层进程内缓存(`_CACHE_TTL = 15.0` 秒,`_cache` 是模块级全局)。后台保存会调 `set_many` → `load_all` 立刻刷新缓存,但**只刷新处理该请求的那个进程**。线上 `FT_WORKERS=2`,所以另一个 worker 最多再陈旧 15 秒。表现为:改完上限后绝大多数情况立即生效,极端情况下 15 秒内完全一致。**始终不需要重启容器。**
+⚠️ `settings_service` 使用进程内缓存（`_CACHE_TTL = 15.0` 秒）。后台保存会刷新当前进程缓存；多 worker 部署中的其他进程最多延迟 15 秒获得新设置，无需重启容器。
 
 回归测试 `test_max_upload_mb_setting_takes_effect_without_restart`:上限收紧到 1MB → 2MB 文件得 413;放宽到 20MB → 同一个文件立刻 201,且 `/dashboard` 显示「20 MB」。对照实验:把该行改回只读 `env_settings.max_upload_mb` 即失败。

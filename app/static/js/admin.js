@@ -499,11 +499,45 @@
 
   /* ------------------------------------------------------------ 表单提交 */
 
+  var offlineStatusTimer = null;
+  async function refreshOfflineStatus() {
+    clearTimeout(offlineStatusTimer);
+    var label = document.getElementById('offline-admin-status');
+    if (!label) return;
+    try {
+      var data = await FT.request('/admin/api/offline/status');
+      var service = (data && data.service) || data || {};
+      label.classList.remove('badge-success', 'badge-danger', 'badge-primary');
+      if (service.enabled === false) label.textContent = '离线下载已关闭';
+      else if (service.available === false) {
+        label.textContent = service.error || '下载服务暂时不可用';
+        label.classList.add('badge-danger');
+      } else if (service.config_synced === false) {
+        label.textContent = '服务已连接，设置等待同步';
+        label.classList.add('badge-primary');
+        offlineStatusTimer = setTimeout(refreshOfflineStatus, document.hidden ? 15000 : 5000);
+      } else {
+        label.textContent = '服务已连接，设置已同步';
+        label.classList.add('badge-success');
+      }
+    } catch (error) {
+      label.textContent = '暂时无法检查下载服务';
+      label.classList.remove('badge-success');
+    }
+  }
+
+  var offlineRefresh = document.getElementById('offline-admin-refresh');
+  if (offlineRefresh) {
+    offlineRefresh.addEventListener('click', refreshOfflineStatus);
+    refreshOfflineStatus();
+  }
+
   var FORMS = {
     settings: async function (form) {
       var payload = collectForm(form);
       var data = await FT.request('/admin/api/settings', { method: 'POST', body: payload });
       FT.toast((data && data.message) || '设置已保存', 'success');
+      refreshOfflineStatus();
     },
 
     'mail-test': async function (form) {
@@ -537,6 +571,7 @@
       await handler(form);
     } catch (error) {
       FT.toast(error.message, 'error');
+    } finally {
       restore();
     }
   });

@@ -56,6 +56,19 @@ DEFAULTS: dict[str, Any] = {
     # 日志
     "logs.retention_days": 0,  # 0 = 不自动清理
     "logs.max_rows": 500000,
+    "offline.enabled": False,
+    "offline.seed_enabled": False,
+    "offline.seed_minutes": 60,
+    "offline.seed_ratio": 1.0,
+    "offline.download_limit_mbps": 0,
+    "offline.upload_limit_mbps": 0,
+    "offline.global_concurrency": 3,
+    "offline.user_concurrency": 1,
+    "offline.max_tasks_per_user": 20,
+    "offline.temp_max_mb": 40960,
+    "offline.min_free_mb": 1024,
+    "offline.metadata_max_mb": 5,
+    "offline.max_torrent_files": 1000,
 }
 
 #: 这些键的值不允许通过后台接口返回给前端
@@ -190,6 +203,8 @@ async def template_settings(db: AsyncSession) -> dict[str, Any]:
         # 对外展示一律按这个来：站内所有容量都用 human_size 走同一套格式，
         # 20 GB 就显示成 "20.00 GB"，不会被写成 20480 MB
         "max_upload_bytes": _i("quota.max_upload_mb", env_settings.max_upload_mb) * 1024 * 1024,
+        "offline_enabled": _b("offline.enabled", False),
+        "offline_metadata_max_mb": _i("offline.metadata_max_mb", 5),
         "smtp_configured": bool(host and sender),
     }
 

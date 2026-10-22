@@ -25,6 +25,7 @@ alembic==1.20.0
 
 # ---- 表单 / 文件上传 ----
 python-multipart==0.0.32
+httpx==0.28.1
 
 # ---- 安全 ----
 bcrypt==5.0.0

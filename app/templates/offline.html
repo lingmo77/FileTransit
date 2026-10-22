@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}离线下载 · {{ cfg.name }}{% endblock %}
+
+{% block content %}
+  <section
+    id="offline-app"
+    data-enabled="{{ 'true' if cfg.offline_enabled | default(false) else 'false' }}"
+    data-max-expire-days="{{ cfg.max_expire_days }}"
+    data-metadata-max-mb="{{ cfg.offline_metadata_max_mb | default(5) }}"
+    data-can-forever="{{ 'true' if current_user.can_save_forever else 'false' }}"
+  >
+    <div class="page-head">
+      <div>
+        <h1>离线下载</h1>
+        <p class="subtitle">由服务器持续下载，关闭页面后任务仍会继续</p>
+      </div>
+      <button type="button" class="btn btn-primary" id="offline-new" {% if not cfg.offline_enabled | default(false) %}disabled{% endif %}>
+        {{ icon('plus', 16) }} 新建任务
+      </button>
+    </div>
+
+    <div class="offline-service alert" id="offline-service" role="status" aria-live="polite">
+      <span class="offline-service-dot" aria-hidden="true"></span>
+      <span id="offline-service-text">正在连接下载服务…</span>
+      <button type="button" class="btn btn-sm btn-ghost" id="offline-refresh">刷新</button>
+    </div>
+
+    <div class="offline-context small muted">
+      <span>{{ icon('file', 15) }} 完成后存入「我的文件」</span>
+      <span>默认不公开 · 默认保留 14 天</span>
+    </div>
+
+    <div class="offline-toolbar">
+      <div class="offline-filters" role="group" aria-label="任务状态">
+        <button type="button" class="offline-filter active" data-offline-filter="all" aria-pressed="true">全部</button>
+        <button type="button" class="offline-filter" data-offline-filter="running" aria-pressed="false">进行中</button>
+        <button type="button" class="offline-filter" data-offline-filter="complete" aria-pressed="false">已保存</button>
+        <button type="button" class="offline-filter" data-offline-filter="error" aria-pressed="false">失败</button>
+      </div>
+      <span class="tiny muted" id="offline-count"></span>
+    </div>
+
+    <div class="offline-task-list" id="offline-tasks" aria-label="我的离线下载任务"></div>
+    <div class="card empty" id="offline-empty" hidden>
+      <div class="icon">{{ icon('inbox', 26) }}</div>
+      <p id="offline-empty-text">还没有离线下载任务</p>
+      <span class="small muted">添加文件直链、磁力链接或 BT 种子开始下载</span>
+    </div>
+    <div class="offline-pagination" id="offline-pagination" hidden>
+      <button type="button" class="btn btn-sm" id="offline-prev">上一页</button>
+      <span class="small muted" id="offline-page-label"></span>
+      <button type="button" class="btn btn-sm" id="offline-next">下一页</button>
+    </div>
+    <p class="offline-footer-note tiny muted">任务记录和源信息仅自己可见。公开分享只作用于保存成功的文件。</p>
+  </section>
+
+  <template id="offline-create-template">
+    <div class="modal-backdrop offline-modal">
+      <section class="modal card" role="dialog" aria-modal="true" aria-labelledby="offline-create-title">
+        <div class="card-head"><h2 id="offline-create-title">新建离线下载</h2><button type="button" class="icon-btn" data-close aria-label="关闭">{{ icon('x', 18) }}</button></div>
+        <form id="offline-create-form">
+          <div class="card-body">
+            <div class="offline-input-tabs" role="tablist" aria-label="下载来源">
+              <button type="button" id="offline-link-tab" role="tab" aria-selected="true" aria-controls="offline-link-panel" class="btn btn-sm active" data-input-tab="link">链接</button>
+              <button type="button" id="offline-torrent-tab" role="tab" aria-selected="false" aria-controls="offline-torrent-panel" class="btn btn-sm" data-input-tab="torrent">BT 种子</button>
+            </div>
+            <div id="offline-link-panel" role="tabpanel" aria-labelledby="offline-link-tab">
+              <div class="field"><label for="offline-urls">下载链接</label><textarea id="offline-urls" name="urls" rows="4" maxlength="64000" placeholder="https://example.com/file.zip&#10;magnet:?xt=urn:btih:…"></textarea><span class="help">每行一个 HTTP/HTTPS 文件直链或磁力链接</span></div>
+            </div>
+            <div id="offline-torrent-panel" role="tabpanel" aria-labelledby="offline-torrent-tab" hidden>
+              <div class="field"><label for="offline-torrent-file">BT 种子文件</label><input id="offline-torrent-file" name="torrent" type="file" accept=".torrent,application/x-bittorrent" /><span class="help" data-torrent-hint></span></div>
+            </div>
+            <div class="field"><label for="offline-retention">保留时长</label><select id="offline-retention" name="expires_hours"></select><span class="help">从文件成功存入网盘时开始计算</span><span class="help" data-retention-hint hidden></span></div>
+            <label class="checkbox"><input id="offline-public" type="checkbox" name="is_public" /><span>完成后公开分享<span class="tiny muted" style="display:block">默认仅自己可见；公开后会出现在首页</span></span></label>
+            <div class="offline-form-error alert alert-danger" data-form-error role="alert" hidden></div>
+            <div class="offline-create-results" data-create-results hidden></div>
+          </div>
+          <div class="card-foot row" style="justify-content:flex-end"><button type="button" class="btn" data-close>取消</button><button type="submit" class="btn btn-primary">创建任务</button></div>
+        </form>
+      </section>
+    </div>
+  </template>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/js/offline.js?v=1"></script>
+{% endblock %}

@@ -1790,6 +1790,74 @@ select {
   }
 }
 
+/* ---------------------------------------------------------------- 离线下载 */
+
+.offline-service {
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.offline-service > span:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.offline-service-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.offline-service[data-status='connected'] .offline-service-dot { background: var(--success); }
+.offline-service[data-status='waiting'] .offline-service-dot { background: var(--warning); }
+.offline-context { display: flex; align-items: center; gap: 10px 20px; flex-wrap: wrap; margin-bottom: 20px; }
+.offline-context > span { display: inline-flex; align-items: center; gap: 6px; }
+.offline-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.offline-filters { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.offline-filter { appearance: none; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-soft); font: inherit; font-size: .9rem; padding: 9px 0 12px; cursor: pointer; }
+.offline-filter.active { color: var(--primary); border-bottom-color: var(--primary); }
+.offline-task-list { display: grid; gap: 14px; }
+.offline-task { padding: 20px; min-width: 0; }
+.offline-task-heading { display: flex; align-items: flex-start; gap: 12px; }
+.offline-task-name { font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; margin: 0 0 5px; }
+.offline-task-heading > .badge { flex: none; }
+.offline-task-meta { overflow-wrap: anywhere; }
+.offline-progress { margin-top: 15px; }
+.offline-task-transfer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 7px 16px; margin-top: 10px; font-variant-numeric: tabular-nums; }
+.offline-task-error { color: var(--danger); overflow-wrap: anywhere; margin: 12px 0 0; }
+.offline-task-actions { justify-content: flex-end; margin-top: 15px; }
+.offline-task-saved { margin-top: 9px; }
+.offline-pagination { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 16px; margin-top: 22px; }
+.offline-pagination[hidden], #offline-empty[hidden], .offline-modal [hidden] { display: none !important; }
+.offline-footer-note { margin-top: 20px; }
+.offline-input-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+.offline-input-tabs .active { background: var(--primary-soft); color: var(--primary); border-color: color-mix(in srgb, var(--primary) 30%, var(--border)); }
+.offline-form-error { margin-top: 16px; overflow-wrap: anywhere; }
+.offline-create-results { margin-top: 15px; font-size: .85rem; color: var(--text-soft); }
+.offline-create-results p { margin-bottom: 7px; }
+.offline-create-results ul { margin: 0; padding-left: 20px; }
+.offline-file-modal { max-width: 720px; }
+.offline-file-tools { margin-bottom: 12px; }
+.offline-files-list { border-top: 1px solid var(--border); }
+.offline-file-row { display: flex; align-items: center; gap: 11px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.offline-file-row input[type='checkbox'] { flex: none; width: 17px; height: 17px; accent-color: var(--primary); }
+.offline-file-path { overflow-wrap: anywhere; min-width: 0; font-size: .88rem; }
+.offline-file-row > .small { flex: none; font-variant-numeric: tabular-nums; }
+.offline-admin-status { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+
+@media (max-width: 640px) {
+  .topbar { height: auto; min-height: var(--header-h); }
+  .topbar .container { flex-wrap: wrap; row-gap: 5px; padding-top: 8px; padding-bottom: 8px; }
+  .topbar .brand { min-width: 0; max-width: 100%; }
+  .topbar .nav { flex: 1 0 100%; justify-content: flex-end; min-width: 0; gap: 3px; }
+  .topbar .nav-link { padding: 7px 8px; white-space: nowrap; }
+  .offline-service { gap: 8px; }
+  .offline-service .btn { padding-left: 7px; padding-right: 7px; }
+  .offline-context { gap: 6px 12px; }
+  .offline-task { padding: 15px; }
+  .offline-task-heading { flex-wrap: wrap; gap: 8px; }
+  .offline-task-heading > .grow { flex-basis: 100%; }
+  .offline-task-actions { gap: 8px; }
+  .offline-task-actions .btn { min-height: 38px; }
+  .offline-modal { padding: 12px; }
+  .offline-modal .modal { max-height: calc(100dvh - 24px); }
+  .offline-modal textarea, .offline-modal select { font-size: 16px; }
+  .offline-file-row { flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+  .offline-file-row > .small { margin-left: auto; }
+  .offline-filter { min-height: 42px; }
+}
+
 /* 尊重系统的"减少动态效果"设置 */
 @media (prefers-reduced-motion: reduce) {
   *,

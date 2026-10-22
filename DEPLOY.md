@@ -1,6 +1,6 @@
 # 文件中转站 · 部署实施说明
 
-适用版本：**file-transfer 1.0**（2026-10-09）
+适用版本：1.3.0，提供标准版和含离线下载版。Aria2 是可选组件；先阅读 [EDITIONS.md](EDITIONS.md) 选择安装包与配置。第 2–8 节的基础命令用于标准版，增强版按第 10 节使用同时定义网盘与 Aria2 的单个完整配置文件。
 
 本文档面向执行部署的人，从头到尾照着做即可。全流程只需要 Docker，不需要装 Python、Node 或数据库。
 
@@ -13,8 +13,8 @@
 | 项 | 最低 | 建议 | 说明 |
 | --- | --- | --- | --- |
 | 操作系统 | Linux x86_64 | Ubuntu 22.04 / 24.04 | 镜像按 **amd64** 构建，ARM 机器需自行重新构建 |
-| Docker | 20.10+ | 24+ | `docker --version` |
-| Docker Compose | v2（`docker compose`） | v2.20+ | 注意是空格分隔的 `docker compose`，不是 `docker-compose` |
+| Docker | 25.0+（离线镜像包） | 使用受维护版本 | `docker --version`；旧版本可尝试源码构建 |
+| Docker Compose | v2.24.0+（`docker compose`） | 使用受维护版本 | 当前文件使用 `env_file.required`，不是旧 `docker-compose` |
 | 内存 | 1 GB | 2 GB+ | `FT_WORKERS` 每进程约 150–250 MB |
 | 磁盘 | 5 GB | 按上传量预留 | 用户上传的文件全部存在数据卷里 |
 
@@ -38,12 +38,15 @@ ss -tlnp | grep 8000     # 确认端口没被占用
 
 | 包 | 大小 | 用途 |
 | --- | --- | --- |
-| `file-transfer-src-*.tar.gz` | ~135 KB | 纯源码 + 配置 + 本文档。目标机器需联网执行构建 |
-| `file-transfer-offline-*.tar.gz` | ~68 MB | 源码 + **已构建好的镜像**。完全离线可部署 |
+| `file-transfer-src-*.tar.gz` | 以 Release 为准 | 源码、Compose、Aria2 配置和文档，需联网构建 |
+| `file-transfer-standard-*.tar.gz` | 以 Release 为准 | 标准版，仅包含网盘镜像 |
+| `file-transfer-with-aria2-*.tar.gz` | 以 Release 为准 | 增强版，包含网盘与 Aria2 两份镜像 |
 
-离线包里镜像本身就是 68 MB（`docker load` 后展开占用约 308 MB 磁盘）。这个 tar 已经压不动了——实测再套一层 gzip 只省 0.7%，所以包里放的是原始 tar，不是 `.tar.gz`。
+镜像安装包使用原始 `docker save` tar 保存，校验值见 `images/SHA256SUMS`；发布包整体使用 gzip 压缩。请为镜像加载和用户数据预留空间。
 
-**建议优先用离线包**：不依赖外网，不受目标机器代理/镜像源故障影响。之前有台机器就因为 dockerd 配了失效代理导致任何镜像都拉不动，离线包可以完全绕开这类问题。
+离线包不依赖部署时联网下载基础镜像和依赖。源码包便于在其他架构构建。
+
+当前 Compose 使用的 `env_file.required` 需要 Compose 2.24.0 及以上，见 [Docker 官方说明](https://docs.docker.com/reference/compose-file/services/#required)。
 
 ---
 
@@ -51,10 +54,10 @@ ss -tlnp | grep 8000     # 确认端口没被占用
 
 ### 2.1 上传并解包
 
-把 `file-transfer-offline-*.tar.gz` 传到目标机器（`scp`、U 盘、内网共享均可），然后：
+把 `file-transfer-standard-*.tar.gz` 传到目标机器（`scp`、U 盘、内网共享均可），然后：
 
 ```bash
-tar xzf file-transfer-offline-2026-10-09.tar.gz -C /opt
+tar xzf file-transfer-standard-1.3.0.tar.gz -C /opt
 cd /opt/file-transfer
 ```
 
@@ -66,13 +69,13 @@ cd /opt/file-transfer
 docker load -i images/file-transfer-1.0.tar
 ```
 
-预期输出 `Loaded image: file-transfer:1.0`。确认一下：
+标准版预期加载 `file-transfer:1.0`；增强版另加载 Aria2，见第 10 节。
 
 ```bash
 docker images file-transfer
 ```
 
-> **关于镜像格式**：这个镜像由 Docker 29.4.3（containerd 镜像存储）导出，是 **OCI layout** 格式（包内是 `index.json` + `blobs/sha256/`），不是老的 `manifest.json` + `layer.tar` 结构。
+> **关于镜像格式**：离线附件可能使用 OCI layout（`index.json` + `blobs/sha256/`）。使用 Docker 25.0 及以上；旧版本无法识别时使用源码包现场构建。
 >
 > 在 **Docker 25.0 及以上**（或启用了 containerd 镜像存储的版本）上 `docker load` 可直接识别。若目标机器 Docker 较老、报出无法识别的格式，请改用第 3 章的**源码包**方式现场构建，效果完全等价。
 >
@@ -88,7 +91,7 @@ docker images file-transfer
 cp .env.example .env
 ```
 
-**必须改两项**，其余可保持默认：
+**必须修改密钥和管理员口令**；离线下载还需填写第 10 节的出口封锁地址：
 
 ```bash
 # 1) 生成密钥并填进 FT_SECRET_KEY（下面这条命令直接输出可用的值）
@@ -118,7 +121,7 @@ sed -i "s|^FT_WORKERS=.*|FT_WORKERS=2|" .env
 docker compose up -d
 ```
 
-离线包场景**不要加 `--build`**（也没必要，镜像已导入）。等几秒后看状态：
+标准版镜像安装包使用 `docker compose up -d --no-build`，后台离线下载保持关闭，无需配置 Aria2。增强版步骤见第 10 节。等几秒后看状态：
 
 ```bash
 docker compose ps
@@ -141,10 +144,10 @@ curl -s -o /dev/null -w "健康检查 HTTP %{http_code}\n" http://127.0.0.1:8000
 目标机器能联网（能拉 `python:3.12-slim`、能 `pip install`）时可用。
 
 ```bash
-tar xzf file-transfer-src-2026-10-09.tar.gz -C /opt
+tar xzf file-transfer-src-1.3.0.tar.gz -C /opt
 cd /opt/file-transfer
 cp .env.example .env
-# 同样要改 FT_SECRET_KEY 和 FT_ADMIN_PASSWORD，见 2.3
+# 修改密钥、管理员口令和 Aria2 出口封锁地址，见 2.3、10.1
 
 docker compose up -d --build     # 注意这里有 --build
 ```
@@ -226,7 +229,7 @@ docker compose up -d               # 再次启动
 
 ### 5.2 数据在哪
 
-所有持久化数据都在一个 Docker 命名卷里：`<目录名>_ft-data`，目录名叫 `file-transfer` 时即 `file-transfer_ft-data`。里面是：
+原有网盘数据保留在 Docker 命名卷 `<目录名>_ft-data`，目录名叫 `file-transfer` 时即 `file-transfer_ft-data`。里面是：
 
 ```
 /app/data/app.db      # SQLite 数据库（用户、文件记录、日志、站点设置）
@@ -239,31 +242,9 @@ docker compose up -d               # 再次启动
 docker volume inspect file-transfer_ft-data --format '{{.Mountpoint}}'
 ```
 
-### 5.3 备份
+### 5.3 数据保留与回退
 
-停容器再备份最稳妥（SQLite 用 WAL 模式，热备份需额外处理）：
-
-```bash
-cd /opt/file-transfer
-docker compose stop
-docker run --rm \
-  -v file-transfer_ft-data:/data \
-  -v "$(pwd):/backup" \
-  alpine tar czf /backup/ft-backup-$(date +%F).tar.gz -C /data .
-docker compose start
-```
-
-恢复（会覆盖现有数据）：
-
-```bash
-cd /opt/file-transfer
-docker compose stop
-docker run --rm \
-  -v file-transfer_ft-data:/data \
-  -v "$(pwd):/backup" \
-  alpine sh -c "rm -rf /data/* && tar xzf /backup/ft-backup-2026-10-09.tar.gz -C /data"
-docker compose start
-```
+按项目维护约定，更新时不自动创建生产备份。直接更新必要代码，保留现有数据库、用户文件、命名卷、`.env` 和密钥。不得清空卷后还原旧数据库，这会丢失升级后的新增数据。回退须使用能识别当前迁移版本的镜像，或先关闭离线入口和协调器，不执行数据库降级。
 
 ### 5.4 日志与过期清理
 
@@ -350,9 +331,9 @@ Nginx 的 `client_max_body_size` 太小，请求根本没转发到应用。见�
 
 ```bash
 cd /opt/file-transfer
-# 1) 先备份（见 5.3）
+# 1) 保留原有数据库、卷、.env 和密钥，不自动备份或清库
 # 2) 用新包覆盖代码
-tar xzf file-transfer-offline-新版.tar.gz -C /opt
+tar xzf file-transfer-standard-新版.tar.gz -C /opt
 #    .env 不在包里，不会被覆盖
 docker load -i images/file-transfer-1.0.tar
 docker compose up -d
@@ -384,7 +365,7 @@ docker compose up -d
 
 此前分片上传版 1.2.0 曾撤回到 1.1.2。2026-10-17 用户授权将当前整文件上传代码的审计与布局修复统一发布为 1.2.0。数据库中的 `upload_sessions` 表和 `d42e8f6b9a10` 迁移记录继续保留，避免通过降级数据库影响新增的用户和文件。当前源码保留该迁移脚本，因此从当前源码重新构建可以识别已升级的数据卷。
 
-直接使用原始 1.1.2 镜像时，它不包含这个迁移脚本，需要继续挂载服务器保留的新版迁移目录。服务器 `/home/docker/file-transfer/docker-compose.rollback.yml` 内容如下：
+直接使用原始 1.1.2 镜像时，它不包含这个迁移脚本，需要继续挂载保留的新版迁移目录。以 `/opt/file-transfer/docker-compose.rollback.yml` 为例：
 
 ```yaml
 services:
@@ -396,3 +377,88 @@ services:
 先确保脚本可读：`chmod -R a+rX migrations`，再执行 `docker compose -f docker-compose.yml -f docker-compose.rollback.yml up -d --no-build --pull never app`。原 `.env` 和 `ft-data` 数据卷继续使用，不执行数据库降级或数据卷删除。
 
 部署后的功能修改须先让用户手动测试，询问「发布还是继续修改/新增功能」；只有用户明确决定发布，才统一推送代码和更新 Release。2026-10-17 的新版 1.2.0 按用户明确发布指令执行，以本次审计与布局修复代码为准。
+
+## 10. Aria2 离线下载服务
+
+### 10.1 构建与接入
+
+本地 Windows 开发使用 `.venv`，不需要安装 Docker。把经本地验证的源码同步到原服务器部署目录；不要同步本地 `data/`、`.env` 或 `.venv/`。保持原 Compose 项目名与 `ft-data` 卷，直接更新必要文件，不自动创建生产备份。
+
+源码中的 `docker-compose.yml` 仅定义 app；`docker-compose.aria2.yml` 是独立的完整增强版配置，已同时定义 app、Aria2 及所需卷，不与标准版叠加。增强版安装包已将完整配置命名为 `docker-compose.yml`；可直接使用默认命令。以下显式 `-f docker-compose.aria2.yml` 命令适用于共用源码目录。
+
+可选 `aria2` 镜像来自 `docker/aria2/Dockerfile`，使用 Debian trixie 的固定 Aria2 包版本 `1.37.0+debian-3`。修改基础镜像/软件包版本需重新完成协议和网络防护联调。
+
+在服务器原有 `.env` 中只增补必要项目，不覆盖原文件：
+
+```dotenv
+FT_ARIA2_BT_PORT=16881
+FT_ARIA2_PACKAGE_VERSION=1.37.0+debian-3
+# 填入本站/反向代理自身公网地址；示例仅展示格式，需替换为真实地址。
+FT_ARIA2_BLOCKED_NETWORKS=203.0.113.10/32,2001:db8::10/128
+```
+
+公网地址变更时同步更新封锁列表并重建 Aria2，不能只修改 DDNS。`FT_ARIA2_BLOCKED_NETWORKS` 留空时下载容器拒绝启动，普通网盘仍可工作。引擎已经拒绝非公网 IPv4/IPv6、宿主机所在内网、Docker 网络、回环及云元数据地址；该环境变量补充站点自身公网回环，不能用公网示例地址代替实际调查。
+
+```bash
+docker compose -f docker-compose.aria2.yml config --quiet
+docker compose -f docker-compose.aria2.yml build app aria2
+docker compose -f docker-compose.aria2.yml up -d aria2 app
+docker compose -f docker-compose.aria2.yml ps
+```
+
+`config --quiet` 避免把展开后的密钥打印到终端。RPC `6800` 只在 Compose 网络中访问，不能增加公网映射。BT 使用配置端口的 TCP/UDP；部署时先确认端口占用和外部防火墙/NAT 环境。普通网盘服务允许在 Aria2 未就绪时工作，离线服务会显示不可用并自动重试。
+
+### 10.2 新卷与密钥
+
+| 卷 | 挂载与内容 |
+| --- | --- |
+| 原 `ft-data` | 仅 app `/app/data`；原有数据库与成品文件，保持不变 |
+| `ft-offline` | app `/app/offline`、Aria2 `/downloads`；`tasks/<随机ID>/payload`、私有源和 `control/` |
+| `ft-aria2-state` | 仅 Aria2 `/state`；session、DHT 和引擎私有配置 |
+
+Aria2 首次启动在 `control/rpc-secret` 自动生成密钥并持久保留，不输出密钥。app 通过 `FT_ARIA2_RPC_SECRET_FILE` 读取该文件；不需要重置现有 `FT_SECRET_KEY`。仅初始化新增卷根目录和控制文件权限，不遍历或改动原用户 storage。
+
+Aria2 使用 UID `10001`；只读磁盘监测使用 UID `10002`、组 `10001`。任务目录和策略文件应允许该组读取（目录至少 `0750`、文件 `0640`），不得向公网提供 `control/` 或任务暂存目录。
+
+### 10.3 出口限制与独立磁盘监测
+
+下载容器仅在自己的网络命名空间初始化 nftables OUTPUT 规则；不使用 host 网络、privileged 或 Docker socket，不修改宿主机全局防火墙。仅允许明确 DNS 请求及已建立连接回复，拒绝非公网/受保护目的地址。回环 RPC 例外仅给予 watchdog UID，下载进程本身不能利用该例外访问本地 RPC。
+
+初始化所需能力由 Compose 显式列出；随后 Aria2 和监测进程均降权并清空能力 bounding set，禁止后续提权。规则安装失败时引擎不启动，不以关闭防护绕过联调。健康检查仅内部调用 `getVersion`，不打印 secret。
+
+web 协调器将预算和任务意图原子写入 `control/policy.json`：
+
+```json
+{"temp_max_bytes":42949672960,"min_free_bytes":1073741824,"tasks":{"<任务ID>":{"max_bytes":104857600,"desired_state":"running"}}}
+```
+
+独立 watchdog 每约 2 秒检查已分配暂存字节和磁盘可用空间，即使 app 重启仍持续工作。缺少有效策略、未知任务、任务预算超出或触及磁盘低水位时暂停任务；结果写入 `control/watchdog-status.json`，由协调器尊重暂停原因。磁盘保护留有传输安全余量，属于软保护；命名卷本身不是硬配额。
+
+### 10.4 恢复、做种和限速
+
+引擎持久化 `.aria2` 控制文件、种子/磁力元数据、会话和 DHT。启动时恢复任务保持暂停，由协调器核对数据库意图后放行，防止陈旧 session 复活已取消任务。单独更新 app 时不重建健康的 Aria2，下载可继续。
+
+做种、全局下载/上传限速在「管理后台 → 站点设置」配置。默认完成后不做种，上下行 `0` 都表示不限速。继续做种使用暂存源副本，网盘成品通过复制入库，两份占用纳入预算。关闭继续做种会停止现有做种任务；不会自动恢复已经结束的任务。BT 下载期间仍可能上传，上传限速同时覆盖该阶段。
+
+### 10.5 两种镜像安装包
+
+标准版只需要网盘镜像；增强版需要两份镜像。打包脚本传入两份镜像时同时生成标准版与增强版安装包：
+
+```bash
+docker save file-transfer:1.0 -o file-transfer-1.0.tar
+docker save file-transfer-aria2:1.37.0 -o file-transfer-aria2-1.37.0.tar
+```
+
+Windows 本地打包：
+
+```powershell
+.venv\Scripts\python.exe package.py --version <批次名> --image <网盘镜像tar> --aria2-image <Aria2镜像tar>
+```
+
+Linux 也可用 `./package.sh --image <网盘镜像tar> --aria2-image <Aria2镜像tar>`。增强版目标机分别 `docker load -i` 两个 tar，再 `docker compose -f docker-compose.aria2.yml up -d --no-build`。`images/SHA256SUMS` 同时记录两份校验和。省略 `--aria2-image` 时只生成标准版安装包；两种安装包配置见 `EDITIONS.md`。
+
+### 10.6 部署验收与发布
+
+使用可控的小型 HTTP、磁力和多文件种子测试资源，验证私密/公开、14 天起算、文件选择、配额、上下行限速、做种策略、引擎/网盘分别重启、取消后不复活、保存中断恢复和暂存回收。网络限制使用专用测试服务验证，不探测真实内部服务。不得填满生产磁盘或删除既有用户文件来制造故障。
+
+部署后仍需用户手动测试，再询问「本次修改是否通过，发布还是继续修改/新增功能」。只有明确决定发布后，才推送 GitHub、移动标签或创建/覆盖 Release。
