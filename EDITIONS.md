@@ -51,6 +51,8 @@ docker compose -f docker-compose.yml ps
 
 ## 二、可选 Aria2 离线下载版
 
+> **以下是可选操作，仅供需要 Aria2 离线下载功能的用户执行。标准版用户请跳过本节，可直接阅读第三节“升级及切换”。**
+
 新安装使用 `file-transfer-with-aria2-1.3.0.tar.gz`，解包后同样创建 `.env` 并修改标准版的密钥和管理员口令；已有站点保留原 `.env`，只补充缺失配置。
 
 ```dotenv

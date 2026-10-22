@@ -11,7 +11,8 @@
 
 提供**标准版（仅文件中转）**与**可选 Aria2 离线下载版（文件中转 + Aria2 离线下载）**，安装包及两种配置见 [EDITIONS.md](EDITIONS.md)。默认 Compose 只启动网盘，标准版不需要配置或运行 Aria2。
 
-可选 Aria2 离线下载版使用同时包含网盘与 Aria2 的完整 Compose 文件（源码中为 `docker-compose.aria2.yml`，可选 Aria2 离线下载版安装包中已作为 `docker-compose.yml`），填写 `FT_ARIA2_BLOCKED_NETWORKS`，列出本站及反向代理自身公网 IP/CIDR，并在管理后台开启离线下载。留空时 Aria2 拒绝启动。公网 IP 变化后同步更新并重建下载容器。
+> **Aria2 离线下载是可选功能。只需要文件上传、分享和下载时，使用标准版即可，无需配置 Aria2，也无需执行下方的“可选 Aria2 离线下载版”步骤。**
+
 - 默认管理员：`admin` / `admin`（首次登录后必须改密）
 
 设计与需求细节见 [PROJECT.md](PROJECT.md)。
@@ -55,25 +56,50 @@ pytest              # 或 pytest -q
 
 ## 2. Docker 部署
 
+**先完成通用准备，再从以下两种部署方式中任选其一。标准版用户完成 2.1 后，跳过 2.2。**
+
+### 通用准备（仅新安装）
+
+**已有部署请保留原 `.env`，无需重新复制模板。**
+
 ```bash
 cp .env.example .env
 # 必须修改 .env 里的 FT_SECRET_KEY：
 #   python -c "import secrets; print(secrets.token_urlsafe(48))"
-# 修改默认管理员口令。此处只启动标准版，不需要 Aria2。
+# 修改默认管理员口令。
+```
 
+### 2.1 标准版：仅文件中转
+
+```bash
 docker compose up -d --build
 docker compose logs -f app
 ```
 
 打开 `http://<服务器IP>:8000`。
 
-可选 Aria2 离线下载版：在 `.env` 配置 `FT_ARIA2_BLOCKED_NETWORKS`，再运行：
+**到这里，标准版已部署完成。下面的 Aria2 部分仅供需要离线下载功能的用户按需选择。**
+
+### 2.2 可选 Aria2 离线下载版（按需启用）
+
+> **本节为可选操作，标准版用户请跳过。只有需要服务器通过 HTTP/HTTPS、磁力链接或 BT 种子下载文件时，才执行本节。**
+
+<details>
+<summary><strong>需要 Aria2 离线下载功能时，点此展开配置与启动命令</strong></summary>
+
+**仅选择可选 Aria2 离线下载版时：**在 `.env` 配置 `FT_ARIA2_BLOCKED_NETWORKS`，填入本站及反向代理自身的实际公网 IP/CIDR，再运行以下源码部署命令：
 
 ```bash
 docker compose -f docker-compose.aria2.yml up -d --build
 ```
 
 服务健康后在后台开启离线下载。此命令只使用一个完整配置文件；可选 Aria2 离线下载版安装包已将它命名为 `docker-compose.yml`，直接 `docker compose up -d --no-build` 即可。完整步骤见 [EDITIONS.md](EDITIONS.md)。
+
+公网 IP 变化后同步更新 `FT_ARIA2_BLOCKED_NETWORKS` 并重建下载容器；此项留空时 Aria2 拒绝启动。
+
+</details>
+
+### 数据存储（两种版本通用）
 
 数据（SQLite 数据库 + 上传的文件）全部在命名卷 `ft-data` 里，容器重建不丢数据：
 
