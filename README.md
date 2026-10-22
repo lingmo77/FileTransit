@@ -9,9 +9,9 @@
 
 当前版本：**1.3.0**。发布内容及升级说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-提供**标准版（仅文件中转）**与**增强版（含可选 Aria2 离线下载）**，安装包及两种配置见 [EDITIONS.md](EDITIONS.md)。默认 Compose 只启动网盘，标准版不需要配置或运行 Aria2。
+提供**标准版（仅文件中转）**与**可选 Aria2 离线下载版（文件中转 + Aria2 离线下载）**，安装包及两种配置见 [EDITIONS.md](EDITIONS.md)。默认 Compose 只启动网盘，标准版不需要配置或运行 Aria2。
 
-增强版使用同时包含网盘与 Aria2 的完整 Compose 文件（源码中为 `docker-compose.aria2.yml`，增强版安装包中已作为 `docker-compose.yml`），填写 `FT_ARIA2_BLOCKED_NETWORKS`，列出本站及反向代理自身公网 IP/CIDR，并在管理后台开启离线下载。留空时 Aria2 拒绝启动。公网 IP 变化后同步更新并重建下载容器。
+可选 Aria2 离线下载版使用同时包含网盘与 Aria2 的完整 Compose 文件（源码中为 `docker-compose.aria2.yml`，可选 Aria2 离线下载版安装包中已作为 `docker-compose.yml`），填写 `FT_ARIA2_BLOCKED_NETWORKS`，列出本站及反向代理自身公网 IP/CIDR，并在管理后台开启离线下载。留空时 Aria2 拒绝启动。公网 IP 变化后同步更新并重建下载容器。
 - 默认管理员：`admin` / `admin`（首次登录后必须改密）
 
 设计与需求细节见 [PROJECT.md](PROJECT.md)。
@@ -67,13 +67,13 @@ docker compose logs -f app
 
 打开 `http://<服务器IP>:8000`。
 
-可选增强版：在 `.env` 配置 `FT_ARIA2_BLOCKED_NETWORKS`，再运行：
+可选 Aria2 离线下载版：在 `.env` 配置 `FT_ARIA2_BLOCKED_NETWORKS`，再运行：
 
 ```bash
 docker compose -f docker-compose.aria2.yml up -d --build
 ```
 
-服务健康后在后台开启离线下载。此命令只使用一个完整配置文件；增强版安装包已将它命名为 `docker-compose.yml`，直接 `docker compose up -d --no-build` 即可。完整步骤见 [EDITIONS.md](EDITIONS.md)。
+服务健康后在后台开启离线下载。此命令只使用一个完整配置文件；可选 Aria2 离线下载版安装包已将它命名为 `docker-compose.yml`，直接 `docker compose up -d --no-build` 即可。完整步骤见 [EDITIONS.md](EDITIONS.md)。
 
 数据（SQLite 数据库 + 上传的文件）全部在命名卷 `ft-data` 里，容器重建不丢数据：
 

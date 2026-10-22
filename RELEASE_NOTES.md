@@ -1,15 +1,17 @@
 # 文件中转站 1.3.0
 
+提供 **标准版（仅文件中转）** 和 **可选 Aria2 离线下载版（文件中转 + Aria2 离线下载）**。按需选择安装包，标准版只启动网盘服务。
+
 新增 Aria2 离线下载：登录用户可在独立任务页提交 HTTP/HTTPS、磁力链接或 BT 种子，下载完成后保存到「我的文件」。任务默认不公开，文件从成功入库起保留 14 天。
 
-本次提供标准版和含离线下载版两种安装包。Aria2 完全可选：基础 `docker-compose.yml` 仅启动网盘；增强版使用包含网盘和 Aria2 的单个完整配置文件，安装包内同样命名为 `docker-compose.yml`。两种完整配置见 `EDITIONS.md`。
+本次提供标准版和可选 Aria2 离线下载版两种安装包。Aria2 完全可选：基础 `docker-compose.yml` 仅启动网盘；可选 Aria2 离线下载版使用包含网盘和 Aria2 的单个完整配置文件，安装包内同样命名为 `docker-compose.yml`。两种完整配置见 `EDITIONS.md`。
 
 ## 新增功能
 
 - 顶部导航提供独立「离线下载」页面，创建、文件选择、暂停、继续、重试、取消和移除历史均在该页操作。
 - 创建任务可选择公开或不公开、保存时长；种子和磁力支持多文件选择，支持 Aria2 兼容的 v1 及混合种子，纯 BT v2 会明确拒绝。
 - 默认下载完成后停止做种。后台可配置继续做种、时长/分享率、全站下载与上传限速、并发和暂存预算；上下行限速 0 表示不限速。
-- Aria2 为可选独立容器，使用增强版完整 Compose 文件启用。新增暂存与引擎状态卷，原网盘数据库和文件卷继续使用；标准版不启动引擎，后台关闭时隐藏导航入口。
+- Aria2 为可选独立容器，使用可选 Aria2 离线下载版完整 Compose 文件启用。新增暂存与引擎状态卷，原网盘数据库和文件卷继续使用；标准版不启动引擎，后台关闭时隐藏导航入口。
 - 任务与配额预占持久化，支持应用/引擎重启恢复、取消后不复活、保存失败后重试入库。
 
 ## 安全与审计修复
@@ -33,9 +35,9 @@
 本版新增迁移 `f18a6c4d7e20` 和 `a6b9e2037c51`，启动时自动增量迁移。保留原数据库、上传目录、数据卷、`.env`、密钥及 Compose 项目名/覆盖文件；不要还原旧数据库或删除卷。
 
 1. 标准版更新应用及基础 Compose，导入网盘镜像即可；不需要 Aria2 配置。
-2. 增强版使用包内已包含两个服务的 `docker-compose.yml`，并更新完整 `docker/aria2/` 目录；在原 `.env` 增补 `FT_ARIA2_BLOCKED_NETWORKS`，填入本站/反向代理自身公网 IP/CIDR。地址变化后同步更新并重建 Aria2，留空时引擎拒绝启动。
-3. 增强版导入两份镜像，使用增强版的单个 Compose 文件；两种方式均保持原项目名与覆盖配置。
-4. 增强版在后台开启离线下载，并检查做种、限速、并发与暂存预算。已有后台设置会保留。标准版保持功能关闭。
+2. 可选 Aria2 离线下载版使用包内已包含两个服务的 `docker-compose.yml`，并更新完整 `docker/aria2/` 目录；在原 `.env` 增补 `FT_ARIA2_BLOCKED_NETWORKS`，填入本站/反向代理自身公网 IP/CIDR。地址变化后同步更新并重建 Aria2，留空时引擎拒绝启动。
+3. 可选 Aria2 离线下载版导入两份镜像，使用可选 Aria2 离线下载版的单个 Compose 文件；两种方式均保持原项目名与覆盖配置。
+4. 可选 Aria2 离线下载版在后台开启离线下载，并检查做种、限速、并发与暂存预算。已有后台设置会保留。标准版保持功能关闭。
 
 完整说明见 `DEPLOY.md` 第 10 节和 `.env.example`。默认 BT 端口为 16881 TCP/UDP；不要将 RPC 6800 映射到公网。
 
@@ -45,7 +47,7 @@
 | --- | --- |
 | `file-transfer-src-1.3.0.tar.gz` | 源码、迁移、Compose、Aria2 Dockerfile/运行配置、环境变量模板及文档 |
 | `file-transfer-standard-1.3.0.tar.gz` | 标准版：源码、通用配置及 Linux amd64 网盘镜像 |
-| `file-transfer-with-aria2-1.3.0.tar.gz` | 增强版：同上，并包含 Aria2 镜像 |
+| `file-transfer-with-aria2-1.3.0.tar.gz` | 可选 Aria2 离线下载版：同上，并包含 Aria2 镜像 |
 | `SHA256SUMS` | 三份发布包的 SHA-256 |
 
 标准版运行：
@@ -55,7 +57,7 @@ docker load -i images/file-transfer-1.0.tar
 docker compose -f docker-compose.yml up -d --no-build
 ```
 
-增强版运行（先按 `EDITIONS.md` 配好 `.env`）：
+可选 Aria2 离线下载版运行（先按 `EDITIONS.md` 配好 `.env`）：
 
 ```sh
 docker load -i images/file-transfer-1.0.tar

@@ -1,6 +1,6 @@
 # 文件中转站 · 部署实施说明
 
-适用版本：1.3.0，提供标准版和含离线下载版。Aria2 是可选组件；先阅读 [EDITIONS.md](EDITIONS.md) 选择安装包与配置。第 2–8 节的基础命令用于标准版，增强版按第 10 节使用同时定义网盘与 Aria2 的单个完整配置文件。
+适用版本：1.3.0，提供标准版和可选 Aria2 离线下载版。Aria2 是可选组件；先阅读 [EDITIONS.md](EDITIONS.md) 选择安装包与配置。第 2–8 节的基础命令用于标准版，可选 Aria2 离线下载版按第 10 节使用同时定义网盘与 Aria2 的单个完整配置文件。
 
 本文档面向执行部署的人，从头到尾照着做即可。全流程只需要 Docker，不需要装 Python、Node 或数据库。
 
@@ -40,7 +40,7 @@ ss -tlnp | grep 8000     # 确认端口没被占用
 | --- | --- | --- |
 | `file-transfer-src-*.tar.gz` | 以 Release 为准 | 源码、Compose、Aria2 配置和文档，需联网构建 |
 | `file-transfer-standard-*.tar.gz` | 以 Release 为准 | 标准版，仅包含网盘镜像 |
-| `file-transfer-with-aria2-*.tar.gz` | 以 Release 为准 | 增强版，包含网盘与 Aria2 两份镜像 |
+| `file-transfer-with-aria2-*.tar.gz` | 以 Release 为准 | 可选 Aria2 离线下载版，包含网盘与 Aria2 两份镜像 |
 
 镜像安装包使用原始 `docker save` tar 保存，校验值见 `images/SHA256SUMS`；发布包整体使用 gzip 压缩。请为镜像加载和用户数据预留空间。
 
@@ -69,7 +69,7 @@ cd /opt/file-transfer
 docker load -i images/file-transfer-1.0.tar
 ```
 
-标准版预期加载 `file-transfer:1.0`；增强版另加载 Aria2，见第 10 节。
+标准版预期加载 `file-transfer:1.0`；可选 Aria2 离线下载版另加载 Aria2，见第 10 节。
 
 ```bash
 docker images file-transfer
@@ -121,7 +121,7 @@ sed -i "s|^FT_WORKERS=.*|FT_WORKERS=2|" .env
 docker compose up -d
 ```
 
-标准版镜像安装包使用 `docker compose up -d --no-build`，后台离线下载保持关闭，无需配置 Aria2。增强版步骤见第 10 节。等几秒后看状态：
+标准版镜像安装包使用 `docker compose up -d --no-build`，后台离线下载保持关闭，无需配置 Aria2。可选 Aria2 离线下载版步骤见第 10 节。等几秒后看状态：
 
 ```bash
 docker compose ps
@@ -384,7 +384,7 @@ services:
 
 本地 Windows 开发使用 `.venv`，不需要安装 Docker。把经本地验证的源码同步到原服务器部署目录；不要同步本地 `data/`、`.env` 或 `.venv/`。保持原 Compose 项目名与 `ft-data` 卷，直接更新必要文件，不自动创建生产备份。
 
-源码中的 `docker-compose.yml` 仅定义 app；`docker-compose.aria2.yml` 是独立的完整增强版配置，已同时定义 app、Aria2 及所需卷，不与标准版叠加。增强版安装包已将完整配置命名为 `docker-compose.yml`；可直接使用默认命令。以下显式 `-f docker-compose.aria2.yml` 命令适用于共用源码目录。
+源码中的 `docker-compose.yml` 仅定义 app；`docker-compose.aria2.yml` 是独立的完整可选 Aria2 离线下载版配置，已同时定义 app、Aria2 及所需卷，不与标准版叠加。可选 Aria2 离线下载版安装包已将完整配置命名为 `docker-compose.yml`；可直接使用默认命令。以下显式 `-f docker-compose.aria2.yml` 命令适用于共用源码目录。
 
 可选 `aria2` 镜像来自 `docker/aria2/Dockerfile`，使用 Debian trixie 的固定 Aria2 包版本 `1.37.0+debian-3`。修改基础镜像/软件包版本需重新完成协议和网络防护联调。
 
@@ -442,7 +442,7 @@ web 协调器将预算和任务意图原子写入 `control/policy.json`：
 
 ### 10.5 两种镜像安装包
 
-标准版只需要网盘镜像；增强版需要两份镜像。打包脚本传入两份镜像时同时生成标准版与增强版安装包：
+标准版只需要网盘镜像；可选 Aria2 离线下载版需要两份镜像。打包脚本传入两份镜像时同时生成标准版与可选 Aria2 离线下载版安装包：
 
 ```bash
 docker save file-transfer:1.0 -o file-transfer-1.0.tar
@@ -455,7 +455,7 @@ Windows 本地打包：
 .venv\Scripts\python.exe package.py --version <批次名> --image <网盘镜像tar> --aria2-image <Aria2镜像tar>
 ```
 
-Linux 也可用 `./package.sh --image <网盘镜像tar> --aria2-image <Aria2镜像tar>`。增强版目标机分别 `docker load -i` 两个 tar，再 `docker compose -f docker-compose.aria2.yml up -d --no-build`。`images/SHA256SUMS` 同时记录两份校验和。省略 `--aria2-image` 时只生成标准版安装包；两种安装包配置见 `EDITIONS.md`。
+Linux 也可用 `./package.sh --image <网盘镜像tar> --aria2-image <Aria2镜像tar>`。可选 Aria2 离线下载版目标机分别 `docker load -i` 两个 tar，再 `docker compose -f docker-compose.aria2.yml up -d --no-build`。`images/SHA256SUMS` 同时记录两份校验和。省略 `--aria2-image` 时只生成标准版安装包；两种安装包配置见 `EDITIONS.md`。
 
 ### 10.6 部署验收与发布
 

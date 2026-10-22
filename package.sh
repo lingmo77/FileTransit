@@ -68,7 +68,7 @@ if [ -n "$IMAGE_TAR" ]; then
     tar czf "$DIST/file-transfer-standard-$VERSION.tar.gz" -C "$STAGE" file-transfer
     ls -lh "$DIST/file-transfer-standard-$VERSION.tar.gz"
     if [ -n "$ARIA2_IMAGE_TAR" ]; then
-        echo "==> 含离线下载版（网盘 + Aria2 镜像）"
+        echo "==> 可选 Aria2 离线下载版（网盘 + Aria2 镜像）"
         cp "$STAGE/file-transfer/docker-compose.aria2.yml" "$STAGE/file-transfer/docker-compose.yml"
         cp "$ARIA2_IMAGE_TAR" "$STAGE/file-transfer/images/file-transfer-aria2-1.37.0.tar"
         ( cd "$STAGE/file-transfer/images" && sha256sum file-transfer-aria2-1.37.0.tar >> SHA256SUMS )

@@ -15,7 +15,7 @@ dist/file-transfer-standard-1.3.0.tar.gz      # 仅文件中转
 dist/file-transfer-with-aria2-1.3.0.tar.gz    # 含可选离线下载
 ```
 
-它由项目根的 `package.py` 或 `package.sh` 按显式清单打包，标准版包含网盘镜像，增强版包含网盘/Aria2 两份镜像，两者均有源码和通用配置；排除 `.venv`、`data`、`.env`、`dist`。仅上传选定的发布包，不同步整个开发目录。
+它由项目根的 `package.py` 或 `package.sh` 按显式清单打包，标准版包含网盘镜像，可选 Aria2 离线下载版包含网盘/Aria2 两份镜像，两者均有源码和通用配置；排除 `.venv`、`data`、`.env`、`dist`。仅上传选定的发布包，不同步整个开发目录。
 
 目标机器能联网并现场构建时，可使用更小的 `file-transfer-src-1.3.0.tar.gz`。包大小和校验值以 Release 附件为准。
 
@@ -27,7 +27,7 @@ dist/file-transfer-with-aria2-1.3.0.tar.gz    # 含可选离线下载
 | --- | --- | --- |
 | `Dockerfile` | 网盘镜像构建文件，两阶段安装二进制 wheel | ✅ 必须 |
 | `docker-compose.yml` | 标准版网盘编排：端口、数据卷、健康检查 | ✅ 必须 |
-| `docker-compose.aria2.yml` | 增强版完整编排，网盘与 Aria2 在同一文件，单独使用 | 增强版需要 |
+| `docker-compose.aria2.yml` | 可选 Aria2 离线下载版完整编排，网盘与 Aria2 在同一文件，单独使用 | 可选 Aria2 离线下载版需要 |
 | `EDITIONS.md` | 两种安装包的配置、升级与切换说明 | 📄 建议 |
 | `.dockerignore` | 构建镜像时的排除清单，挡住 `.venv` / `data` / `.env` 进镜像 | ✅ 必须 |
 | `.env.example` | 环境变量模板。服务器上 `cp .env.example .env` 再改密钥 | ✅ 必须 |
@@ -86,7 +86,7 @@ dist/file-transfer-with-aria2-1.3.0.tar.gz    # 含可选离线下载
 ## 4. 上传与更新步骤
 
 ```bash
-# 1) 上传标准版安装包，在服务器上解开；增强版步骤见 EDITIONS.md
+# 1) 上传标准版安装包，在服务器上解开；可选 Aria2 离线下载版步骤见 EDITIONS.md
 tar xzf file-transfer-standard-1.3.0.tar.gz -C /tmp
 
 # 2) 覆盖代码（.env 不在包里，服务器上原有的不会被覆盖）
@@ -99,7 +99,7 @@ tar cf - -C /tmp/file-transfer \
 docker load -i /tmp/file-transfer/images/file-transfer-1.0.tar
 docker compose -f docker-compose.yml config --quiet
 docker compose -f docker-compose.yml up -d --no-build
-# 增强版使用 with-aria2 安装包，包内默认 Compose 已包含两个服务，按 EDITIONS.md 启动。
+# 可选 Aria2 离线下载版使用 with-aria2 安装包，包内默认 Compose 已包含两个服务，按 EDITIONS.md 启动。
 ```
 
 > ⚠️ **只 `docker compose build` 而不跟 `up -d` 会留下不一致状态**：标签已指向新镜像，但运行中的容器仍绑在旧镜像 ID 上，`docker system df` 会把它算成 300 MB 左右「可回收」。补一次 `up -d` 即可对齐。详见 `DEPLOY.md` §8。
@@ -136,4 +136,4 @@ find app migrations docker tests -type f ! -name '*.pyc' ! -path '*__pycache__*'
 - `images/`（离线包解出来的镜像 tar，本地在 `dist/` 里）
 - `data/`（如果用 `docker compose` 挂在项目目录的话；本项目数据在命名卷 `file-transfer_ft-data` 里，不落在这里）
 
-新增离线下载后还会有 `ft-offline`（共享暂存/密钥）和 `ft-aria2-state`（仅引擎状态）命名卷。原有 `ft-data` 保持原名和内容。源码包包含可选 `docker/aria2/`；标准版只需要网盘镜像，增强版才需要 Aria2 镜像，并使用包含两个服务的单个 Compose 文件。具体命令见 `EDITIONS.md`。
+新增离线下载后还会有 `ft-offline`（共享暂存/密钥）和 `ft-aria2-state`（仅引擎状态）命名卷。原有 `ft-data` 保持原名和内容。源码包包含可选 `docker/aria2/`；标准版只需要网盘镜像，可选 Aria2 离线下载版才需要 Aria2 镜像，并使用包含两个服务的单个 Compose 文件。具体命令见 `EDITIONS.md`。

@@ -1,6 +1,6 @@
-# 增强版完整编排：网盘 + 可选 Aria2，单独使用本文件。
+# 可选 Aria2 离线下载版完整编排：网盘 + 可选 Aria2，单独使用本文件。
 # 源码目录：docker compose -f docker-compose.aria2.yml up -d --build
-# 增强版安装包已将本文件作为 docker-compose.yml，无需额外 -f。
+# 可选 Aria2 离线下载版安装包已将本文件作为 docker-compose.yml，无需额外 -f。
 # 填写 FT_ARIA2_BLOCKED_NETWORKS，服务健康后在管理后台开启离线下载。
 services:
   app:

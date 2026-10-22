@@ -2,7 +2,7 @@
 #   cp .env.example .env   # 改掉 FT_SECRET_KEY
 #   docker compose up -d --build
 #
-# 标准版只启动网盘。增强版完整配置另见 docker-compose.aria2.yml，单独使用。
+# 标准版只启动网盘。可选 Aria2 离线下载版完整配置另见 docker-compose.aria2.yml，单独使用。
 # 更新不自动备份、不删除或替换现有数据卷。
 
 services:
