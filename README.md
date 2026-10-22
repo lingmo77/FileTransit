@@ -84,9 +84,6 @@ docker compose logs -f app
 
 > **本节为可选操作，标准版用户请跳过。只有需要服务器通过 HTTP/HTTPS、磁力链接或 BT 种子下载文件时，才执行本节。**
 
-<details>
-<summary><strong>需要 Aria2 离线下载功能时，点此展开配置与启动命令</strong></summary>
-
 **仅选择可选 Aria2 离线下载版时：**在 `.env` 配置 `FT_ARIA2_BLOCKED_NETWORKS`，填入本站及反向代理自身的实际公网 IP/CIDR，再运行以下源码部署命令：
 
 ```bash
@@ -96,8 +93,6 @@ docker compose -f docker-compose.aria2.yml up -d --build
 服务健康后在后台开启离线下载。此命令只使用一个完整配置文件；可选 Aria2 离线下载版安装包已将它命名为 `docker-compose.yml`，直接 `docker compose up -d --no-build` 即可。完整步骤见 [EDITIONS.md](EDITIONS.md)。
 
 公网 IP 变化后同步更新 `FT_ARIA2_BLOCKED_NETWORKS` 并重建下载容器；此项留空时 Aria2 拒绝启动。
-
-</details>
 
 ### 数据存储（两种版本通用）
 
