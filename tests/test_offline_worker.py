@@ -55,6 +55,8 @@ class Engine:
 async def engine(transport, monkeypatch):
     fake = Engine()
     monkeypatch.setattr(worker, "rpc", fake)
+    # Reconciliation tests supply a healthy network guard with their fake RPC.
+    monkeypatch.setattr(worker, "protection_error", lambda _host: None)
     worker._applied = None
     worker._seed_applied.clear()
     # Different tests use different owners. Keep engine reconciliation task-scoped
@@ -96,6 +98,28 @@ async def values(**updates):
     result.update({"offline.enabled":True,"offline.min_free_mb":0})
     result.update(updates)
     return result
+
+
+async def test_scheduler_publishes_site_domain_and_blocks_until_guard_ready(api, user, engine, monkeypatch):
+    identifier, _, _ = await task_for(user, state="queued")
+    async with SessionLocal() as db:
+        config = dict(await settings_service.all_values(db, force=True))
+    config.update({"site.base_url": "https://PAN.example.com.:8443", "offline.enabled": True})
+    async def configured(*args, **kwargs):
+        return config
+    monkeypatch.setattr(settings_service, "all_values", configured)
+    seen = []
+    monkeypatch.setattr(worker, "protection_error", lambda host: "网络保护测试暂停" if host == "pan.example.com" else "域名错误")
+    async def handle(task_id, _values, blocked):
+        seen.append((task_id, blocked))
+    monkeypatch.setattr(worker, "_handle", handle)
+    await worker.run_once()
+    policy = json.loads((settings.offline_root / "control/policy.json").read_text())
+    assert policy["site_hostname"] == "pan.example.com"
+    assert (identifier, "网络保护测试暂停") in seen
+    status = await worker.service_status()
+    assert not status["available"] and not status["config_synced"]
+    assert status["error"] == "网络保护测试暂停"
 
 
 def complete_status(task_id,gid,data,*,kind="http",state="complete"):

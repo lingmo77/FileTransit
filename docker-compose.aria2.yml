@@ -1,7 +1,8 @@
 # 可选 Aria2 离线下载版完整编排：网盘 + 可选 Aria2，单独使用本文件。
-# 源码目录：docker compose -f docker-compose.aria2.yml up -d --build
-# 可选 Aria2 离线下载版安装包已将本文件作为 docker-compose.yml，无需额外 -f。
-# 填写 FT_ARIA2_BLOCKED_NETWORKS，服务健康后在管理后台开启离线下载。
+# 标准安装包：先加载网盘镜像，再 pull aria2，使用本文件启动两个服务。
+# docker compose -f docker-compose.aria2.yml pull aria2
+# docker compose -f docker-compose.aria2.yml up -d --no-build
+# 服务健康后，在管理后台填写站点根地址并开启离线下载；自动按域名保护本站。
 services:
   app:
     build:
@@ -49,11 +50,11 @@ services:
       dockerfile: docker/aria2/Dockerfile
       args:
         ARIA2_VERSION: ${FT_ARIA2_PACKAGE_VERSION:-1.37.0+debian-3}
-    image: file-transfer-aria2:1.37.0
+    image: ${FT_ARIA2_IMAGE:-ghcr.io/lingmo77/filetransit-aria2:1.3.1}
     restart: unless-stopped
     environment:
       FT_ARIA2_BT_PORT: ${FT_ARIA2_BT_PORT:-16881}
-      # Include this site's / reverse proxy's own public IPs. Never expose RPC.
+      # Optional extra IP/CIDR blocks; site DNS protection comes from admin settings.
       FT_ARIA2_BLOCKED_NETWORKS: ${FT_ARIA2_BLOCKED_NETWORKS:-}
     ports:
       - "${FT_ARIA2_BT_PORT:-16881}:${FT_ARIA2_BT_PORT:-16881}/tcp"
@@ -63,7 +64,7 @@ services:
       - ft-aria2-state:/state
     cap_drop:
       - ALL
-    # Only initialization uses these; both runtime processes discard all caps.
+    # Aria2/watchdog drop all caps. The isolated network guard keeps NET_ADMIN only.
     cap_add:
       - NET_ADMIN
       - CHOWN

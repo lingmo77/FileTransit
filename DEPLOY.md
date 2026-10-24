@@ -1,6 +1,6 @@
 # 文件中转站 · 部署实施说明
 
-适用版本：1.3.0，提供标准版和可选 Aria2 离线下载版。Aria2 是可选组件；先阅读 [EDITIONS.md](EDITIONS.md) 选择安装包与配置。第 2–8 节的基础命令用于标准版，可选 Aria2 离线下载版按第 10 节使用同时定义网盘与 Aria2 的单个完整配置文件。
+适用版本：1.3.1，Release 仅提供标准网盘安装包；需要离线下载时按需从镜像仓库拉取适配的 Aria2 镜像。Aria2 是可选组件；先阅读 [EDITIONS.md](EDITIONS.md) 选择安装包与配置。第 2–8 节的基础命令用于标准版，可选 Aria2 离线下载版按第 10 节使用同时定义网盘与 Aria2 的单个完整配置文件。
 
 本文档面向执行部署的人，从头到尾照着做即可。全流程只需要 Docker，不需要装 Python、Node 或数据库。
 
@@ -40,7 +40,6 @@ ss -tlnp | grep 8000     # 确认端口没被占用
 | --- | --- | --- |
 | `file-transfer-src-*.tar.gz` | 以 Release 为准 | 源码、Compose、Aria2 配置和文档，需联网构建 |
 | `file-transfer-standard-*.tar.gz` | 以 Release 为准 | 标准版，仅包含网盘镜像 |
-| `file-transfer-with-aria2-*.tar.gz` | 以 Release 为准 | 可选 Aria2 离线下载版，包含网盘与 Aria2 两份镜像 |
 
 镜像安装包使用原始 `docker save` tar 保存，校验值见 `images/SHA256SUMS`；发布包整体使用 gzip 压缩。请为镜像加载和用户数据预留空间。
 
@@ -57,7 +56,7 @@ ss -tlnp | grep 8000     # 确认端口没被占用
 把 `file-transfer-standard-*.tar.gz` 传到目标机器（`scp`、U 盘、内网共享均可），然后：
 
 ```bash
-tar xzf file-transfer-standard-1.3.0.tar.gz -C /opt
+tar xzf file-transfer-standard-1.3.1.tar.gz -C /opt
 cd /opt/file-transfer
 ```
 
@@ -144,7 +143,7 @@ curl -s -o /dev/null -w "健康检查 HTTP %{http_code}\n" http://127.0.0.1:8000
 目标机器能联网（能拉 `python:3.12-slim`、能 `pip install`）时可用。
 
 ```bash
-tar xzf file-transfer-src-1.3.0.tar.gz -C /opt
+tar xzf file-transfer-src-1.3.1.tar.gz -C /opt
 cd /opt/file-transfer
 cp .env.example .env
 # 修改密钥、管理员口令和 Aria2 出口封锁地址，见 2.3、10.1
@@ -386,38 +385,30 @@ services:
 
 本地 Windows 开发使用 `.venv`，不需要安装 Docker。把经本地验证的源码同步到原服务器部署目录；不要同步本地 `data/`、`.env` 或 `.venv/`。保持原 Compose 项目名与 `ft-data` 卷，直接更新必要文件，不自动创建生产备份。
 
-源码中的 `docker-compose.yml` 仅定义 app；`docker-compose.aria2.yml` 是独立的完整可选 Aria2 离线下载版配置，已同时定义 app、Aria2 及所需卷，不与标准版叠加。可选 Aria2 离线下载版安装包已将完整配置命名为 `docker-compose.yml`；可直接使用默认命令。以下显式 `-f docker-compose.aria2.yml` 命令适用于共用源码目录。
+源码中的 `docker-compose.yml` 仅定义 app；`docker-compose.aria2.yml` 是独立的完整可选 Aria2 离线下载版配置，已同时定义 app、Aria2 及所需卷，不与标准版叠加。标准安装包和源码包均包含这两个文件。需要离线下载时单独使用 `-f docker-compose.aria2.yml`；不提供捆绑 Aria2 镜像的 Release 安装包。
 
-可选 `aria2` 镜像来自 `docker/aria2/Dockerfile`，使用 Debian trixie 的固定 Aria2 包版本 `1.37.0+debian-3`。修改基础镜像/软件包版本需重新完成协议和网络防护联调。
+可选 `aria2` 适配镜像为 `ghcr.io/lingmo77/filetransit-aria2:1.3.1`，从 `docker/aria2/Dockerfile` 构建，使用 Debian trixie 的固定 Aria2 包版本 `1.37.0+debian-3`。必须使用本项目适配镜像，不能直接替换为其他 Aria2 镜像。修改基础镜像/软件包版本需重新完成协议和网络防护联调。
 
 在服务器原有 `.env` 中只增补必要项目，不覆盖原文件：
 
 ```dotenv
 FT_ARIA2_BT_PORT=16881
 FT_ARIA2_PACKAGE_VERSION=1.37.0+debian-3
-# 以下展示只有一个公网 IPv4 的格式；示例地址必须替换。
-FT_ARIA2_BLOCKED_NETWORKS=203.0.113.10
 ```
 
-**需要填几个 IP 取决于实际部署，不是固定两个。**这是下载引擎的禁止访问地址列表，用来阻止 Aria2 经公网地址访问本站服务。
+服务启动后，在「管理后台 → 站点设置」填写**站点根地址**，例如 `https://pan.example.com`；自定义端口可写为 `https://pan.example.com:8443`。复用这一项即可，**无需手动填写站点或反向代理 IP**。
 
-| 情况 | 示例填写值（必须换成实际地址） |
-| --- | --- |
-| 没有反向代理，或网盘与代理共用一个公网 IPv4 | `203.0.113.10`，只填一次 |
-| 网盘和代理分别使用不同的公网 IPv4 | `203.0.113.10,198.51.100.20`，两个都填 |
-| 同时有公网 IPv4 和公网 IPv6 | `203.0.113.10,2001:db8::10`，两种地址都填 |
-| 网盘或代理有更多公网地址 | 全部列出，用英文逗号分隔并去重 |
+系统拒绝直接下载本站域名及其子域名的链接；独立网络保护进程每 20 秒解析站点域名，将全部 IPv4/IPv6 自动加入容器网络黑名单，同时保留最近 24 小时解析到的地址，防止地址轮换后旧连接绕过。网络层限制也覆盖直接 IP、HTTP 重定向和 BT 的出站连接。DDNS 地址变化后自动刷新，不必修改 `.env` 或重建容器；新解析结果通常在约 20 秒后刷新，另需 DNS 查询与策略同步时间。若域名与其他下载站点共享同一 IP，该 IP 上的其他站点也会被拦截。
 
-没有公网 IPv6 时不必添加 IPv6。服务器只有内网地址时，不要编造它的公网 IP；仍需列出站点实际使用的公网入口、代理地址，以及服务器经 NAT 对外使用的公网地址（若有）。内网、回环和 Docker 网络已有内置限制。
+未填写有效站点地址、DNS 解析失败或网络保护中断时，离线下载暂停并自动重试；容器可正常启动，普通文件中转不受影响。下载进程与磁盘监控不保留任何 Linux capability；独立网络保护进程仅保留容器网络命名空间内的 `NET_ADMIN`，不监听端口、不操作宿主机防火墙，停止刷新时内核中的短期放行凭证会自动过期。
 
-**只填 IP 或 CIDR，不填域名、URL、端口、访问者或下载网站的 IP。**直接写单个 IP 即可；IPv4 `/32`、IPv6 `/128` 都表示一个地址。仅在确实需要封锁整个网段时使用更大的 CIDR 范围，以免误拦正常下载来源。
-
-公网地址变更时同步更新封锁列表并重建 Aria2，不能只修改 DDNS。`FT_ARIA2_BLOCKED_NETWORKS` 留空时下载容器拒绝启动，普通网盘仍可工作。引擎已经拒绝非公网 IPv4/IPv6、宿主机所在内网、Docker 网络、回环及云元数据地址；该环境变量补充站点自身公网回环，不能用公网示例地址代替实际调查。
+**高级选填：**若使用 CDN，域名解析只能获取 CDN 入口，无法自动发现隐藏的源站 IP 或其他未出现在该域名 DNS 中的公网管理入口。需要额外封锁时，可在原 `.env` 中补充 `FT_ARIA2_BLOCKED_NETWORKS`，值为英文逗号分隔的 IP/CIDR，修改后重建 Aria2；原有配置继续生效。普通部署保持为空即可。内网、回环、Docker 网络及云元数据地址已有内置限制。
 
 ```bash
 docker compose -f docker-compose.aria2.yml config --quiet
-docker compose -f docker-compose.aria2.yml build app aria2
-docker compose -f docker-compose.aria2.yml up -d aria2 app
+docker compose -f docker-compose.aria2.yml build app  # 已从标准包加载网盘镜像可跳过
+docker compose -f docker-compose.aria2.yml pull aria2
+docker compose -f docker-compose.aria2.yml up -d --no-build aria2 app
 docker compose -f docker-compose.aria2.yml ps
 ```
 
@@ -439,7 +430,7 @@ Aria2 使用 UID `10001`；只读磁盘监测使用 UID `10002`、组 `10001`。
 
 下载容器仅在自己的网络命名空间初始化 nftables OUTPUT 规则；不使用 host 网络、privileged 或 Docker socket，不修改宿主机全局防火墙。仅允许明确 DNS 请求及已建立连接回复，拒绝非公网/受保护目的地址。回环 RPC 例外仅给予 watchdog UID，下载进程本身不能利用该例外访问本地 RPC。
 
-初始化所需能力由 Compose 显式列出；随后 Aria2 和监测进程均降权并清空能力 bounding set，禁止后续提权。规则安装失败时引擎不启动，不以关闭防护绕过联调。健康检查仅内部调用 `getVersion`，不打印 secret。
+初始化所需能力由 Compose 显式列出；随后 Aria2 和磁盘监测进程均降权并清空能力 bounding set，禁止后续提权。单独的网络保护进程仅保留 `NET_ADMIN` 来更新容器内的域名地址黑名单。规则安装失败时引擎不启动，不以关闭防护绕过联调。健康检查仅内部调用 `getVersion`，不打印 secret。
 
 web 协调器将预算和任务意图原子写入 `control/policy.json`：
 
@@ -455,22 +446,23 @@ web 协调器将预算和任务意图原子写入 `control/policy.json`：
 
 做种、全局下载/上传限速在「管理后台 → 站点设置」配置。默认完成后不做种，上下行 `0` 都表示不限速。继续做种使用暂存源副本，网盘成品通过复制入库，两份占用纳入预算。关闭继续做种会停止现有做种任务；不会自动恢复已经结束的任务。BT 下载期间仍可能上传，上传限速同时覆盖该阶段。
 
-### 10.5 两种镜像安装包
+### 10.5 标准安装包与可选镜像
 
-标准版只需要网盘镜像；可选 Aria2 离线下载版需要两份镜像。打包脚本传入两份镜像时同时生成标准版与可选 Aria2 离线下载版安装包：
+Release 仅发布标准网盘安装包、源码包和校验文件。标准包只包含网盘镜像，Aria2 不打包到 Release 附件中；需要离线下载时按第 10.1 节从镜像仓库拉取。
+
+服务器导出网盘镜像：
 
 ```bash
 docker save file-transfer:1.0 -o file-transfer-1.0.tar
-docker save file-transfer-aria2:1.37.0 -o file-transfer-aria2-1.37.0.tar
 ```
 
 Windows 本地打包：
 
 ```powershell
-.venv\Scripts\python.exe package.py --version <批次名> --image <网盘镜像tar> --aria2-image <Aria2镜像tar>
+.venv\Scripts\python.exe package.py --version <批次名> --image <网盘镜像tar>
 ```
 
-Linux 也可用 `./package.sh --image <网盘镜像tar> --aria2-image <Aria2镜像tar>`。可选 Aria2 离线下载版目标机分别 `docker load -i` 两个 tar，再 `docker compose -f docker-compose.aria2.yml up -d --no-build`。`images/SHA256SUMS` 同时记录两份校验和。省略 `--aria2-image` 时只生成标准版安装包；两种安装包配置见 `EDITIONS.md`。
+Linux 可使用 `./package.sh --image <网盘镜像tar>`。包内 `images/SHA256SUMS` 只记录网盘镜像。GitHub 工作流 `.github/workflows/publish-aria2.yml` 构建本项目适配的 Aria2 镜像，发布到 GHCR；对外提供下载前应确认包为公开状态，并验证无需登录即可拉取。
 
 ### 10.6 部署验收与发布
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import time
 
 from runtime import CONTROL, DOWNLOADS, rpc
 
@@ -52,6 +53,16 @@ def inspect_once() -> str | None:
     except (OSError, ValueError, TypeError):
         rpc("aria2.forcePauseAll")
         return "waiting for a valid disk policy"
+    try:
+        network = json.loads((CONTROL / "network-status.json").read_text(encoding="utf-8"))
+        now = time.time()
+        if (network.get("site_hostname") != limits.get("site_hostname") or network.get("ready") is not True
+                or not 0 <= now - float(network["updated_at"]) < 15
+                or not now < float(network["expires_at"]) <= now + 15):
+            raise ValueError("network protection unavailable")
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        rpc("aria2.forcePauseAll")
+        return "waiting for site network protection"
     active = rpc("aria2.tellActive", [["gid", "dir", "status"]])
     try:
         used = occupied_bytes(DOWNLOADS / "tasks")

@@ -11,7 +11,8 @@ import sys
 import time
 
 from firewall import install
-from runtime import CONTROL, DOWNLOADS, GID, SECRET, STATE, UID, WATCHDOG_UID, drop_privileges, rpc
+from runtime import (CONTROL, DOWNLOADS, GID, SECRET, STATE, UID, WATCHDOG_UID,
+                     drop_privileges, network_guard_privileges, rpc)
 from watchdog import inspect_once
 
 stopping = False
@@ -85,6 +86,9 @@ def main() -> int:
     config = prepare()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, stop)
+    guard = subprocess.Popen([sys.executable, str(Path(__file__).with_name("network_guard.py"))],
+                             preexec_fn=network_guard_privileges,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     child = subprocess.Popen(["aria2c", "--conf-path=" + str(config)],
                              preexec_fn=lambda: drop_privileges(UID),
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -92,6 +96,10 @@ def main() -> int:
     last_warning = None
     try:
         while child.poll() is None and not stopping:
+            if guard.poll() is not None:
+                # Exiting namespace PID 1 also terminates the downloader.
+                print("[aria2] network protection exited; downloader stopping", flush=True)
+                return 1
             try:
                 warning = inspect_once()
                 state = CONTROL / "watchdog-status.json"

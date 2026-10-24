@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tarfile
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -51,10 +52,16 @@ def test_firewall_requires_real_resolver_and_valid_networks(firewall):
         firewall.blocked_networks("1.2.3.4; accept")
 
 
-def test_container_refuses_start_without_explicit_site_address_protection(firewall, monkeypatch):
+def test_container_starts_with_closed_download_lease_without_manual_ips(firewall, monkeypatch):
     monkeypatch.delenv("FT_ARIA2_BLOCKED_NETWORKS", raising=False)
-    with pytest.raises(RuntimeError, match="site address protection"):
-        firewall.install()
+    calls = []
+    monkeypatch.setattr(firewall.Path, "read_text", lambda _: "nameserver 127.0.0.11")
+    monkeypatch.setattr(firewall.subprocess, "run", lambda *args, **kwargs: calls.append(kwargs["input"]))
+    firewall.install()
+    assert "meta skuid != @site_ready reject" in calls[0]
+    assert "elements = { 10001" not in calls[0]
+    assert calls[0].index("jump site_guard") < calls[0].index("ct state established,related accept")
+    assert "ct direction original jump site_guard" in calls[0]
 
 
 @pytest.fixture
@@ -71,6 +78,8 @@ def watchdog(tmp_path, monkeypatch):
     (tmp_path / "tasks").mkdir()
     monkeypatch.setitem(sys.modules, "runtime", SimpleNamespace(CONTROL=control, DOWNLOADS=tmp_path, rpc=rpc))
     module = load_module("offline_disk_watchdog", ROOT / "docker/aria2/watchdog.py")
+    (control / "network-status.json").write_text(json.dumps({"ready": True, "updated_at": time.time(),
+                                                           "expires_at": time.time() + 15}))
     monkeypatch.setattr(module.shutil, "disk_usage", lambda _: SimpleNamespace(free=1000 * 1024**2))
     return SimpleNamespace(module=module, root=tmp_path, control=control, calls=calls, replies=replies)
 
@@ -120,6 +129,18 @@ def test_watchdog_fails_closed_if_disk_usage_cannot_be_read(watchdog, monkeypatc
 
     monkeypatch.setattr(watchdog.module, "occupied_bytes", unreadable)
     assert watchdog.module.inspect_once() == "temporary disk usage cannot be verified"
+    assert ("aria2.forcePauseAll", None) in watchdog.calls
+
+
+@pytest.mark.parametrize("network", [None, {"ready": False}, {"ready": True, "updated_at": 1, "expires_at": 2}])
+def test_watchdog_pauses_without_current_network_protection(watchdog, network):
+    write_policy(watchdog)
+    path = watchdog.control / "network-status.json"
+    if network is None:
+        path.unlink()
+    else:
+        path.write_text(json.dumps(network))
+    assert watchdog.module.inspect_once() == "waiting for site network protection"
     assert ("aria2.forcePauseAll", None) in watchdog.calls
 
 

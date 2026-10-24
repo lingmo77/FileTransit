@@ -515,7 +515,6 @@
       } else if (service.config_synced === false) {
         label.textContent = '服务已连接，设置等待同步';
         label.classList.add('badge-primary');
-        offlineStatusTimer = setTimeout(refreshOfflineStatus, document.hidden ? 15000 : 5000);
       } else {
         label.textContent = '服务已连接，设置已同步';
         label.classList.add('badge-success');
@@ -523,6 +522,8 @@
     } catch (error) {
       label.textContent = '暂时无法检查下载服务';
       label.classList.remove('badge-success');
+    } finally {
+      offlineStatusTimer = setTimeout(refreshOfflineStatus, document.hidden ? 15000 : 5000);
     }
   }
 

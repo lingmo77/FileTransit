@@ -8,7 +8,7 @@ import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-MANIFEST = ["app", "migrations", "tests", "docker", "Dockerfile", "docker-compose.yml", "docker-compose.aria2.yml",
+MANIFEST = ["app", "migrations", "tests", "docker", ".github", "Dockerfile", "docker-compose.yml", "docker-compose.aria2.yml",
             ".dockerignore", ".gitignore", ".gitattributes", ".env.example", "alembic.ini", "pytest.ini",
             "requirements.txt", "requirements-dev.txt", "package.sh", "package.py",
             "README.md", "PROJECT.md", "DEPLOY.md", "FILES.md", "LICENSE", "AGENTS.md", "AUDIT_FIXES.md",

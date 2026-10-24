@@ -45,7 +45,7 @@ cd "$ROOT"
 # 用 tar 管道复制，顺手把缓存排除掉；.env 和本地 data/ 绝不能进包
 tar cf - \
     --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
-    app migrations tests docker \
+    app migrations tests docker .github \
     Dockerfile docker-compose.yml docker-compose.aria2.yml .dockerignore .gitignore .gitattributes .env.example \
     alembic.ini pytest.ini requirements.txt requirements-dev.txt package.sh package.py \
     README.md PROJECT.md DEPLOY.md FILES.md OFFLINE_DOWNLOAD_PLAN.md RELEASE_NOTES.md EDITIONS.md \

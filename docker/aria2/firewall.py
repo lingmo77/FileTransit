@@ -10,7 +10,6 @@ import ipaddress
 import os
 from pathlib import Path
 import subprocess
-import sys
 
 DENY_V4 = (
     "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
@@ -42,8 +41,17 @@ def rules(resolvers: list, additional: list) -> str:
                                            + [net for net in additional if net.version == 4]))
     v6 = list(ipaddress.collapse_addresses([ipaddress.ip_network(net) for net in DENY_V6]
                                            + [net for net in additional if net.version == 6]))
-    lines = ["table inet ft_offline {", " chain output {",
+    lines = ["table inet ft_offline {",
+             " set site_ready { typeof meta skuid; flags timeout; timeout 15s; }",
+             " set site_v4 { type ipv4_addr; }",
+             " set site_v6 { type ipv6_addr; }",
+             " chain site_guard {",
+             "  meta skuid != @site_ready reject",
+             "  ip daddr @site_v4 reject",
+             "  ip6 daddr @site_v6 reject",
+             " }", " chain output {",
              "  type filter hook output priority 0; policy accept;",
+             "  meta skuid 10001 ct direction original jump site_guard",
              "  ct state established,related accept",
              "  meta skuid 10002 ip daddr 127.0.0.1 tcp dport 6800 accept"]
     # Docker's embedded resolver DNATs port 53 in this namespace. Match the
@@ -63,10 +71,6 @@ def install() -> None:
     if os.environ.get("FT_ARIA2_NETWORK_MODE", "bridge") != "bridge":
         raise RuntimeError("only an isolated bridge network is supported")
     additional = blocked_networks(os.environ.get("FT_ARIA2_BLOCKED_NETWORKS", ""))
-    if not additional:
-        print("[aria2] FT_ARIA2_BLOCKED_NETWORKS must include the site's public IPs; downloader remains closed",
-              file=sys.stderr, flush=True)
-        raise RuntimeError("explicit site address protection is required")
     data = rules(nameservers(Path("/etc/resolv.conf").read_text()), additional)
     # nft is not optional: failure prevents the downloader process from starting.
     subprocess.run(["nft", "-f", "-"], input=data, text=True, check=True,

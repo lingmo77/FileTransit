@@ -16,6 +16,34 @@ WATCHDOG_UID = 10002
 GID = 10001
 
 
+def network_guard_privileges() -> None:
+    """Keep only NET_ADMIN, inside the downloader's private network namespace."""
+    if os.getuid() != 0:
+        raise RuntimeError("network guard initialization requires root")
+    libc = ctypes.CDLL(None, use_errno=True)
+    os.setgroups([GID])
+    os.setgid(GID)
+    last_cap = int(Path("/proc/sys/kernel/cap_last_cap").read_text().strip())
+    for capability in range(last_cap + 1):
+        if capability != 12 and libc.prctl(24, capability, 0, 0, 0) != 0:
+            raise OSError(ctypes.get_errno(), "cannot restrict network guard capabilities")
+    if libc.prctl(38, 1, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "cannot set no-new-privileges")
+
+    class Header(ctypes.Structure):
+        _fields_ = [("version", ctypes.c_uint32), ("pid", ctypes.c_int)]
+
+    class Data(ctypes.Structure):
+        _fields_ = [("effective", ctypes.c_uint32), ("permitted", ctypes.c_uint32),
+                    ("inheritable", ctypes.c_uint32)]
+
+    header = Header(0x20080522, 0)
+    data = (Data * 2)()
+    data[0].effective = data[0].permitted = 1 << 12
+    if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:
+        raise OSError(ctypes.get_errno(), "cannot restrict network guard capabilities")
+
+
 def drop_privileges(uid: int) -> None:
     """Discard supplementary groups, the capability bounding set and setuid gains."""
     if os.getuid() != 0:

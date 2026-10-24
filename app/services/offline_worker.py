@@ -23,6 +23,7 @@ from . import files as files_service
 from . import offline, offline_storage as disk, quota, settings_service, storage
 from .activity import log_activity
 from .aria2_rpc import Aria2Error, Aria2ResponseTooLarge, rpc
+from .offline_network import protection_error, site_hostname
 from .upload_slots import _lock
 
 logger = logging.getLogger(__name__)
@@ -424,7 +425,7 @@ async def _admit_transfer(task: OfflineTask, gid: str, values: dict) -> bool:
         return True
 
 
-async def _handle(task_id: str, values: dict, watchdog_blocked: bool) -> None:
+async def _handle(task_id: str, values: dict, watchdog_blocked: bool | str) -> None:
     snapshot = await _snapshot(task_id)
     if not snapshot:
         return
@@ -468,7 +469,7 @@ async def _handle(task_id: str, values: dict, watchdog_blocked: bool) -> None:
                 await _pause_transfer(transfer.gid)
         if not task.imported_at:
             await _set_task(task_id, state="paused", download_speed=0, upload_speed=0,
-                error="等待可用磁盘空间" if watchdog_blocked else None)
+                error=(watchdog_blocked if isinstance(watchdog_blocked, str) else "等待可用磁盘空间") if watchdog_blocked else None)
         return
     await _register_children(task, transfers)
     snapshot = await _snapshot(task_id)
@@ -599,7 +600,9 @@ async def run_once() -> None:
                 logger.exception("离线文件保存发生内部错误（任务 %s）", task_id)
                 await _set_task(task_id, state="error", error="保存失败，可稍后重试")
             del _imports[task_id]
-    policy = {"temp_max_bytes": int(values["offline.temp_max_mb"]) * 1024**2,
+    configured_host = site_hostname(values.get("site.base_url", ""))
+    policy = {"site_hostname": configured_host,
+              "temp_max_bytes": int(values["offline.temp_max_mb"]) * 1024**2,
               "min_free_bytes": int(values["offline.min_free_mb"]) * 1024**2,
               "tasks": {t.id: {"max_bytes": max(t.reserved_bytes, t.total_bytes, int(values["offline.metadata_max_mb"]) * 1024**2) + 32 * 1024**2,
                                "desired_state": t.desired_state if values["offline.enabled"] and t.state != "error" else "paused"} for t in tasks}}
@@ -621,11 +624,13 @@ async def run_once() -> None:
             await rpc.call("changeGlobalOption", _global_options(values))
             _applied = (engine_id, fingerprint)
             _seed_applied.clear()
-        blocked = False
+        network_error = protection_error(configured_host)
+        blocked = network_error or False
         try:
             watchdog = json.loads((settings.offline_root / "control" / "watchdog-status.json").read_text())
-            blocked = bool(watchdog.get("blocked"))
-        except (OSError, ValueError):
+            if not blocked and watchdog.get("blocked") and 0 <= time.time() - float(watchdog.get("updated_at", 0)) < 15:
+                blocked = "站点网络保护正在更新，请稍后重试" if watchdog.get("reason") == "waiting for site network protection" else "等待可用磁盘空间"
+        except (OSError, ValueError, TypeError, AttributeError):
             pass
         for task in tasks:
             try:
@@ -641,7 +646,8 @@ async def run_once() -> None:
                 await _set_task(task.id, state="error", error=str(exc)[:200] if isinstance(exc, offline.OfflineError) else "任务文件或元数据无效")
                 # Stop untrusted payload on validation failure, but keep intent for an explicit retry.
                 await _stop_transfers(task.id)
-        status = {"available": True, "config_synced": True, "error": None, "updated_at": time.time()}
+        status = {"available": not bool(network_error), "config_synced": not bool(network_error),
+                  "error": network_error, "updated_at": time.time()}
     except Aria2Error as exc:
         status = {"available": False, "config_synced": False, "error": str(exc), "updated_at": time.time()}
     await asyncio.to_thread(disk.write_control, "service.json", status)

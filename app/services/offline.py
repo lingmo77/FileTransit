@@ -16,6 +16,7 @@ from ..core.config import settings
 from ..core.templating import fmt_iso
 from ..models import OfflineTask, OfflineTaskFile, OfflineTransfer, User, utcnow
 from . import quota, settings_service, storage
+from .offline_network import is_site_url, site_hostname
 from .torrent_metadata import TorrentError, parse_torrent
 
 TERMINAL_STATES = {"saved", "cancelled"}
@@ -201,6 +202,9 @@ async def create_link_task(db: AsyncSession, user: User, value: str, *, expires_
         task = await _new_task(db, user, kind="magnet", source=source, name=name,
                                info_hash=digest, hours=expires_hours, public=is_public, request_key=request_key)
     else:
+        configured = site_hostname(await settings_service.get_str(db, "site.base_url", ""))
+        if is_site_url(value, configured):
+            raise OfflineError("不能下载本站域名或其子域名的资源")
         source = await validate_http_url(value)
         name = storage.safe_filename(unquote(urlsplit(source).path.rsplit("/", 1)[-1]) or "等待解析文件名")
         task = await _new_task(db, user, kind="http", source=source, name=name,

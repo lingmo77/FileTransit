@@ -1835,6 +1835,7 @@ select {
 .offline-file-path { overflow-wrap: anywhere; min-width: 0; font-size: .88rem; }
 .offline-file-row > .small { flex: none; font-variant-numeric: tabular-nums; }
 .offline-admin-status { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.offline-admin-status .badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 
 @media (max-width: 640px) {
   .topbar { height: auto; min-height: var(--header-h); }

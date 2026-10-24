@@ -71,7 +71,7 @@
               value="{{ values.get('site.base_url', '') }}"
               placeholder="https://pan.example.com"
             />
-            <span class="help">用于拼接邮件里的验证链接；留空则按访问地址自动推断</span>
+            <span class="help">填写本站完整地址，例如 https://pan.example.com。用于邮件链接；启用离线下载时，系统会自动禁止下载该域名及其解析出的 IP，无需手填 IP。</span>
           </div>
           <div class="field">
             <label for="site-footer">页脚文字</label>
@@ -159,9 +159,9 @@
               id="quota-bytes"
               name="quota.default_max_bytes"
               data-transform="gb"
-              step="0.5"
+              step="any"
               min="-1"
-              value="{{ ((values.get('quota.default_max_bytes', 0) | int) / 1073741824) | round(2) }}"
+              value="{{ -1 if (values.get('quota.default_max_bytes', 0) | int) == -1 else (values.get('quota.default_max_bytes', 0) | int) / 1073741824 }}"
             />
             <span class="help">填 -1 表示不限制</span>
           </div>
@@ -185,9 +185,9 @@
               id="quota-upload"
               name="quota.max_upload_mb"
               data-transform="mb"
-              step="0.5"
-              min="0.5"
-              value="{{ ((values.get('quota.max_upload_mb', 20480) | int) / 1024) | round(2) }}"
+              step="any"
+              min="0.0009765625"
+              value="{{ (values.get('quota.max_upload_mb', 20480) | int) / 1024 }}"
             />
             <span class="help"
               >填 GB，例如 20 就是 20 GB；上传时实际生效的就是这个值。环境变量

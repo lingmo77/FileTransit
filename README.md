@@ -7,9 +7,9 @@
 - 部署：Docker / Docker Compose；开发环境用 Python 虚拟环境
 - 离线下载：独立任务页，支持 HTTP/HTTPS、磁力和 BT 种子；默认私密、入库后保留 14 天。Aria2 独立容器，后台配置做种策略及全局上下行限速。
 
-当前版本：**1.3.0**。发布内容及升级说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+当前版本：**1.3.1**。发布内容及升级说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-提供**标准版（仅文件中转）**与**可选 Aria2 离线下载版（文件中转 + Aria2 离线下载）**，安装包及两种配置见 [EDITIONS.md](EDITIONS.md)。默认 Compose 只启动网盘，标准版不需要配置或运行 Aria2。
+Release 只提供**标准版（仅文件中转）安装包**，默认 Compose 只启动网盘。需要**可选 Aria2 离线下载功能**时，在同一安装包基础上从镜像仓库拉取本项目适配的 Aria2 镜像，使用单个完整配置启动两个服务，见 [EDITIONS.md](EDITIONS.md)。
 
 > **Aria2 离线下载是可选功能。只需要文件上传、分享和下载时，使用标准版即可，无需配置 Aria2，也无需执行下方的“可选 Aria2 离线下载版”步骤。**
 
@@ -84,36 +84,17 @@ docker compose logs -f app
 
 > **本节为可选操作，标准版用户请跳过。只有需要服务器通过 HTTP/HTTPS、磁力链接或 BT 种子下载文件时，才执行本节。**
 
-**仅选择可选 Aria2 离线下载版时：**先在 `.env` 配置 `FT_ARIA2_BLOCKED_NETWORKS`。这是下载引擎的**禁止访问地址列表**，用于阻止 Aria2 经公网地址访问本站服务。
-
-**不是固定填两个 IP：把网盘服务器和反向代理实际使用的公网 IP 都列出来，同一个 IP 只填一次。**
-
-| 部署情况 | 如何填写 |
-| --- | --- |
-| 没有反向代理，直接访问网盘 | 填网盘服务器的公网 IP，一个即可 |
-| 网盘与反向代理共用同一个公网 IP | 只填这个 IP，不用重复填两遍 |
-| 网盘服务器和反向代理有不同的公网 IP | 两个都填，用英文逗号 `,` 分隔 |
-| 服务器或代理有多个公网 IP，或还有公网 IPv6 | 将这些地址全部列出；没有公网 IPv6 就不用填 IPv6 |
-
-例如，**只有一个公网 IPv4** 时填写一行：
-
-```dotenv
-FT_ARIA2_BLOCKED_NETWORKS=203.0.113.10
-```
-
-两个不同公网 IPv4 的格式是 `203.0.113.10,198.51.100.20`；同时有公网 IPv4 和 IPv6 的格式是 `203.0.113.10,2001:db8::10`。
-
-**以上地址均为文档示例，必须替换为自己的实际公网地址，不要照抄。**只填 IP 或 CIDR，不填域名、`http://`、端口，也不填访问者或下载网站的 IP。单个 IP 可以直接写；IPv4 的 `/32`、IPv6 的 `/128` 也都表示只封锁这一个地址。内网、回环和 Docker 网络已有内置限制，无需拿内网 IP 代替这里的公网地址。
-
-配置完成后，再运行以下源码部署命令：
+**仅需要可选 Aria2 离线下载功能时执行：**标准安装包先加载其中的网盘镜像；源码部署先构建网盘，然后从镜像仓库拉取 Aria2。
 
 ```bash
-docker compose -f docker-compose.aria2.yml up -d --build
+docker compose -f docker-compose.aria2.yml build app  # 源码部署时执行，已加载网盘镜像可跳过
+docker compose -f docker-compose.aria2.yml pull aria2
+docker compose -f docker-compose.aria2.yml up -d --no-build
 ```
 
-服务健康后在后台开启离线下载。此命令只使用一个完整配置文件；可选 Aria2 离线下载版安装包已将它命名为 `docker-compose.yml`，直接 `docker compose up -d --no-build` 即可。完整步骤见 [EDITIONS.md](EDITIONS.md)。
+服务健康后，在「管理后台 → 站点设置」填写**站点根地址**（例如 `https://pan.example.com`），再开启离线下载。系统自动拦截本站域名及其子域名的下载链接，并将站点域名解析出的 IPv4/IPv6 加入 Aria2 网络黑名单，定期刷新，**无需手动填写 IP，DDNS 地址变更也无需重建容器**。未填写地址或解析失败时，离线下载暂停并自动重试，普通文件中转照常工作。
 
-公网 IP 变化后同步更新 `FT_ARIA2_BLOCKED_NETWORKS` 并重建下载容器；此项留空时 Aria2 拒绝启动。
+此命令只使用一个完整配置文件 `docker-compose.aria2.yml`，其中同时定义网盘和 Aria2；不叠加标准版配置。Release 不附带 Aria2 镜像，默认从 `ghcr.io/lingmo77/filetransit-aria2:1.3.1` 拉取。CDN 后隐藏源站等高级补充配置见 [DEPLOY.md](DEPLOY.md) 第 10.1 节；完整安装步骤见 [EDITIONS.md](EDITIONS.md)。
 
 ### 数据存储（两种版本通用）
 
