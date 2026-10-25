@@ -402,7 +402,9 @@ FT_ARIA2_PACKAGE_VERSION=1.37.0+debian-3
 
 未填写有效站点地址、DNS 解析失败或网络保护中断时，离线下载暂停并自动重试；容器可正常启动，普通文件中转不受影响。下载进程与磁盘监控不保留任何 Linux capability；独立网络保护进程仅保留容器网络命名空间内的 `NET_ADMIN`，不监听端口、不操作宿主机防火墙，停止刷新时内核中的短期放行凭证会自动过期。
 
-**高级选填：**若使用 CDN，域名解析只能获取 CDN 入口，无法自动发现隐藏的源站 IP 或其他未出现在该域名 DNS 中的公网管理入口。需要额外封锁时，可在原 `.env` 中补充 `FT_ARIA2_BLOCKED_NETWORKS`，值为英文逗号分隔的 IP/CIDR，修改后重建 Aria2；原有配置继续生效。普通部署保持为空即可。内网、回环、Docker 网络及云元数据地址已有内置限制。
+**高级选填：**
+
+若使用 CDN，域名解析只能获取 CDN 入口，无法自动发现隐藏的源站 IP 或其他未出现在该域名 DNS 中的公网管理入口。需要额外封锁时，可在原 `.env` 中补充 `FT_ARIA2_BLOCKED_NETWORKS`，值为英文逗号分隔的 IP/CIDR，修改后重建 Aria2；原有配置继续生效。普通部署保持为空即可。内网、回环、Docker 网络及云元数据地址已有内置限制。
 
 ```bash
 docker compose -f docker-compose.aria2.yml config --quiet

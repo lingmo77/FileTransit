@@ -84,7 +84,9 @@ docker compose logs -f app
 
 > **本节为可选操作，标准版用户请跳过。只有需要服务器通过 HTTP/HTTPS、磁力链接或 BT 种子下载文件时，才执行本节。**
 
-**仅需要可选 Aria2 离线下载功能时执行：**标准安装包先加载其中的网盘镜像；源码部署先构建网盘，然后从镜像仓库拉取 Aria2。
+**仅需要可选 Aria2 离线下载功能时执行：**
+
+标准安装包先加载其中的网盘镜像；源码部署先构建网盘，然后从镜像仓库拉取 Aria2。
 
 ```bash
 docker compose -f docker-compose.aria2.yml build app  # 源码部署时执行，已加载网盘镜像可跳过
