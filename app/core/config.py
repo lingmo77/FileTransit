@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     # ---- 默认管理员（首次启动时创建）----
     admin_username: str = "admin"
     admin_password: str = "admin"
+    # Installer seeds these only when the corresponding database setting is absent.
+    initial_site_url: str = ""
+    initial_offline_enabled: bool = False
 
     # ---- 缓存目录 ----
     @property

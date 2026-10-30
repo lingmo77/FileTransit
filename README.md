@@ -1,248 +1,69 @@
 # 文件中转站
 
-临时的文件中转站：访客无需登录即可浏览并下载公开文件；用户登录后可上传文件并设置有效期（最长 30 天）；到期文件由定时任务自动删除，磁盘空间随之回收。
+上传、分享和下载临时文件，到期自动清理。访客可下载公开文件，用户登录后上传，管理员可调整配额、有效期和站点设置。
 
-- 后端：FastAPI + SQLAlchemy 2（异步）+ SQLite（WAL）
-- 前端：Jinja2 服务端渲染 + 原生 CSS/JS，无 Node 构建步骤
-- 部署：Docker / Docker Compose；开发环境用 Python 虚拟环境
-- 离线下载：独立任务页，支持 HTTP/HTTPS、磁力和 BT 种子；默认私密、入库后保留 14 天。Aria2 独立容器，后台配置做种策略及全局上下行限速。
+**当前版本：1.4.0** · [下载安装包](https://github.com/lingmo77/FileTransit/releases/latest) · [安装与升级](EDITIONS.md)
 
-当前版本：**1.3.1**。发布内容及升级说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+## 选择一种部署方式
 
-Release 只提供**标准版（仅文件中转）安装包**，默认 Compose 只启动网盘。需要**可选 Aria2 离线下载功能**时，在同一安装包基础上从镜像仓库拉取本项目适配的 Aria2 镜像，使用单个完整配置启动两个服务，见 [EDITIONS.md](EDITIONS.md)。
-
-> **Aria2 离线下载是可选功能。只需要文件上传、分享和下载时，使用标准版即可，无需配置 Aria2，也无需执行下方的“可选 Aria2 离线下载版”步骤。**
-
-- 默认管理员：`admin` / `admin`（首次登录后必须改密）
-
-设计与需求细节见 [PROJECT.md](PROJECT.md)。
-
----
-
-## 1. 快速开始（本地开发）
-
-需要 **Python 3.12**。
-
-```bash
-# Windows
-python -m venv .venv
-.venv\Scripts\activate
-
-# Linux / macOS
-python3.12 -m venv .venv
-source .venv/bin/activate
-
-pip install -r requirements-dev.txt   # 已包含 requirements.txt
-
-# 可选：准备本地配置
-cp .env.example .env
-
-uvicorn app.main:app --reload --port 8000
-```
-
-打开 <http://127.0.0.1:8000>，用 `admin` / `admin` 登录后台。
-
-数据库迁移、默认设置与默认管理员都在应用启动时自动完成（`app.core.bootstrap`），命令行不需要额外步骤。
-
-### 运行测试
-
-```bash
-pytest              # 或 pytest -q
-```
-
-测试全部跑在系统临时目录下的独立数据目录里（用完即删），**不会**碰到 `data/` 下的真实数据，也不会改动真实的 `admin` 口令。测试期间限流默认关闭（所有请求都来自同一个「IP」，否则会互相干扰）。
-
----
-
-## 2. Docker 部署
-
-**先完成通用准备，再从以下两种部署方式中任选其一。标准版用户完成 2.1 后，跳过 2.2。**
-
-### 通用准备（仅新安装）
-
-**已有部署请保留原 `.env`，无需重新复制模板。**
-
-```bash
-cp .env.example .env
-# 必须修改 .env 里的 FT_SECRET_KEY：
-#   python -c "import secrets; print(secrets.token_urlsafe(48))"
-# 修改默认管理员口令。
-```
-
-### 2.1 标准版：仅文件中转
-
-```bash
-docker compose up -d --build
-docker compose logs -f app
-```
-
-打开 `http://<服务器IP>:8000`。
-
-**到这里，标准版已部署完成。下面的 Aria2 部分仅供需要离线下载功能的用户按需选择。**
-
-### 2.2 可选 Aria2 离线下载版（按需启用）
-
-> **本节为可选操作，标准版用户请跳过。只有需要服务器通过 HTTP/HTTPS、磁力链接或 BT 种子下载文件时，才执行本节。**
-
-**仅需要可选 Aria2 离线下载功能时执行：**
-
-标准安装包先加载其中的网盘镜像；源码部署先构建网盘，然后从镜像仓库拉取 Aria2。
-
-```bash
-docker compose -f docker-compose.aria2.yml build app  # 源码部署时执行，已加载网盘镜像可跳过
-docker compose -f docker-compose.aria2.yml pull aria2
-docker compose -f docker-compose.aria2.yml up -d --no-build
-```
-
-服务健康后，在「管理后台 → 站点设置」填写**站点根地址**（例如 `https://pan.example.com`），再开启离线下载。系统自动拦截本站域名及其子域名的下载链接，并将站点域名解析出的 IPv4/IPv6 加入 Aria2 网络黑名单，定期刷新，**无需手动填写 IP，DDNS 地址变更也无需重建容器**。未填写地址或解析失败时，离线下载暂停并自动重试，普通文件中转照常工作。
-
-此命令只使用一个完整配置文件 `docker-compose.aria2.yml`，其中同时定义网盘和 Aria2；不叠加标准版配置。Release 不附带 Aria2 镜像，默认从 `ghcr.io/lingmo77/filetransit-aria2:1.3.1` 拉取。CDN 后隐藏源站等高级补充配置见 [DEPLOY.md](DEPLOY.md) 第 10.1 节；完整安装步骤见 [EDITIONS.md](EDITIONS.md)。
-
-### 数据存储（两种版本通用）
-
-数据（SQLite 数据库 + 上传的文件）全部在命名卷 `ft-data` 里，容器重建不丢数据：
-
-```bash
-docker compose down            # 保留数据
-docker compose down -v         # 连数据一起删，谨慎使用
-```
-
-### 不用 Compose
-
-```bash
-docker build -t file-transfer:1.0 .
-
-docker run -d --name file-transfer \
-  -p 8000:8000 \
-  -v ft-data:/app/data \
-  -e FT_SECRET_KEY='<换成随机串>' \
-  -e FT_ADMIN_PASSWORD='<换成强口令>' \
-  -e FT_WORKERS=4 \
-  file-transfer:1.0
-```
-
-### 放到 Nginx / Caddy 后面
-
-容器只监听 HTTP，TLS 建议交给反向代理。反代需要注意三件事：
-
-1. **关闭响应缓冲**，否则大文件下载会先落到代理磁盘、失去流式效果：
-   Nginx 里设 `proxy_buffering off;`（或对大文件路径单独设）。
-2. **放行 `Range` 与 `HEAD`**（默认就支持），并放宽请求体大小以匹配后台设置的单文件上限
-   （默认 20480 MB）：`client_max_body_size 20480m;`
-3. **设置 `FT_TRUST_PROXY=true`**，这样真实客户端 IP 才会写进日志、Cookie 的 `Secure`
-   属性也才能正确判断。同时反向代理要转发 `X-Forwarded-For` / `X-Forwarded-Proto`。
-
-参考片段：
-
-```nginx
-location / {
-    proxy_pass http://127.0.0.1:8000;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_buffering off;
-    proxy_request_buffering off;
-    client_max_body_size 20480m;
-    proxy_read_timeout 3600s;
-}
-```
-
----
-
-## 3. 配置
-
-所有配置项都带 `FT_` 前缀，可用环境变量或项目根目录的 `.env` 覆盖，完整清单见 [.env.example](.env.example)。
-
-| 变量 | 默认值 | 说明 |
+| | 完整版（推荐） | 原生版 |
 | --- | --- | --- |
-| `FT_SECRET_KEY` | 开发用占位值 | 签名 Cookie、加密 SMTP 密码。**生产必须改** |
-| `FT_DATA_DIR` | `./data` | SQLite 与文件本体所在目录 |
-| `FT_WORKERS` | `4` | uvicorn 进程数 |
-| `FT_COOKIE_SECURE` | `false` | 走 HTTPS 时设为 `true` |
-| `FT_TRUST_PROXY` | `false` | 在反向代理后面时设为 `true` |
-| `FT_MAX_UPLOAD_MB` | `20480` | 单文件上限的**播种默认值**，只在首次建库时写入；之后在后台「站点设置」里改 |
-| `FT_ADMIN_USERNAME` / `FT_ADMIN_PASSWORD` | `admin` / `admin` | **仅**在数据库中还没有管理员时用于创建 |
+| 安装包 | `file-transfer-with-aria2-1.4.0.tar.gz` | `file-transfer-native-1.4.0.tar.gz` |
+| 运行方式 | Docker，内置网盘和 Aria2 镜像及容器运行组件 | 自动安装 Python 虚拟环境和 systemd 服务 |
+| 离线下载功能 | 自带，支持 HTTP/HTTPS、磁力和 BT | 默认不启用，以后可接入适配的 Aria2 容器 |
+| 安装网络 | 镜像和 Docker/Compose 无需联网下载 | 需要联网安装 Python 和依赖 |
+| 支持服务器 | Linux amd64 + systemd，需具备 iptables、mount | Ubuntu 24.04+ / Debian 13+，Python 3.12+ |
 
-站点层面的设置（站点名称、主题、注册开关、配额默认值、邮件服务器、日志保留策略等）在
-**管理后台 → 站点设置 / 邮件设置** 里改，改完立即生效，无需重启。
+两种安装包都不需要手工填写密码或密钥。首次安装为**每个站点实例**生成随机管理员密码、签名密钥；完整版本的 Aria2 单独生成 RPC 密钥。各网站账号的密码仍由注册用户自行设置。
 
----
+## 一键启动
 
-## 4. 多线程下载（IDM / 迅雷）
-
-下载直链对下载器是透明的，取文件详情页上的地址即可：
-
-```
-http://<站点>/download/<public_id>/<原文件名>
-```
-
-服务端为保证分片抓取做了这些事：
-
-- 响应带 `Accept-Ranges: bytes`，完整支持 `bytes=a-b` / `bytes=a-` / `bytes=-n`，命中范围返回 `206` + `Content-Range`；
-- 支持 `HEAD`（下载器先探测文件大小与是否支持断点）；
-- 按请求独立打开文件句柄，不加进程内锁，连接数只受反向代理与系统 `ulimit` 限制；
-- 响应不做 gzip，`Content-Length` 与实际字节数严格一致；
-- 文件内容不可变，带长缓存 `Cache-Control` 与 `ETag`，重复下载走 304/本地缓存。
-
-用 curl 自测：
+联网安装可直接运行（默认为完整版；末尾的 `bundled` 换为 `native` 即原生版）：
 
 ```bash
-URL=http://127.0.0.1:8000/download/<public_id>/demo.bin
-
-curl -sI "$URL"                    # 看 Accept-Ranges 与 Content-Length
-curl -s -r 0-1023 "$URL" -o p1
-curl -s -r 1024-2047 "$URL" -o p2  # 两段拼起来应与原文件一致
+curl -fsSL https://raw.githubusercontent.com/lingmo77/FileTransit/v1.4.0/quick_start.sh | sudo bash -s -- bundled
 ```
 
-下载次数只按「一次完整下载」记一次：非 0 起始的分片和 `HEAD` 探测都不计数，避免多线程把统计刷高。
+也可以下载安装包后启动：
 
----
-
-## 5. 目录结构
-
-```
-app/
-  main.py              应用装配、中间件、通用路由
-  core/                配置、数据库、安全、CSRF、模板环境、启动引导
-  models/              SQLAlchemy 模型（User / FileItem / Session / ActivityLog / Setting / TaskLock）
-  routers/             页面路由、JSON 接口、下载路由、管理后台
-  services/            业务逻辑（存储、配额、账号、邮件、日志、清理、统计）
-  templates/           Jinja2 模板（含自包含的邮件模板）
-  static/              CSS / JS / favicon
-migrations/            Alembic 迁移脚本
-tests/                 pytest 用例
-docker/entrypoint.sh   容器启动脚本
-data/                  运行时数据（数据库 + 上传文件，已被 .gitignore 忽略）
-```
-
----
-
-## 6. 安全说明
-
-- **口令**：bcrypt（cost 12）哈希存储；会话令牌只存 SHA-256 摘要，数据库泄露也无法直接冒用。
-- **CSRF**：双提交 Cookie（`ft_csrf` Cookie + `X-CSRF-Token` 头），所有写操作强制校验。
-- **SMTP 密码**：用标准库实现（HKDF-SHA256 派生密钥 + HMAC-CTR 加密 + Encrypt-then-MAC），
-  以密文存库，API 只返回 `email.has_password` 布尔值，任何接口都不会回显明文。
-- **上传的 HTML/SVG/XML** 一律降级为 `application/octet-stream` + `attachment` 返回，
-  避免在自己的域名下被浏览器渲染执行（存储型 XSS）。
-- **限流**：登录、注册、重发验证邮件、上传按 IP/用户滑动窗口限流，可用
-  `FT_RATE_LIMIT_ENABLED=false` 关闭（自动化测试就是这么做的）。
-- **默认口令**：`admin/admin` 带着 `must_change_password` 标记，未改密前访问后台会被强制跳到个人设置页。上线前请即刻修改。
-
----
-
-## 7. 常用运维命令
+下载其中一个包，上传到服务器 `/opt`，解压后执行：
 
 ```bash
-# 查看日志
-docker compose logs -f --tail=200 app
-
-# 直接查数据库（日志也可以直接用 SQL 查，需求 4）
-sqlite3 data/app.db "select created_at, username, action, ip_address, browser from activity_logs order by id desc limit 20;"
-
-# 手动触发一次过期清理（也可在后台点「立即执行维护」）
-docker compose exec app python -c "import asyncio; from app.services import cleanup; print(asyncio.run(cleanup.run_maintenance()))"
+tar xzf file-transfer-with-aria2-1.4.0.tar.gz -C /opt
+cd /opt/file-transfer
+sudo bash install.sh
 ```
 
-更新直接覆盖必要代码，不自动创建生产备份；保留现有数据库、用户文件、卷、`.env` 和密钥。离线服务的网络限制、端口、卷和双镜像打包见 [部署说明第 10 节](DEPLOY.md#10-aria2-离线下载服务)。
+原生版只需把文件名换成 `file-transfer-native-1.4.0.tar.gz`，其余步骤相同。
+
+打开安装结果中的地址，默认端口 **8000**，管理员 **admin**。查看随机初始密码：
+
+```bash
+sudo bash ftctl password
+```
+
+首次登录后修改密码。后续升级沿用 `.env`，不会重新生成密码和密钥。
+
+```bash
+sudo bash ftctl status    # 状态
+sudo bash ftctl restart   # 重启
+sudo bash ftctl stop      # 停止，保留数据
+sudo bash ftctl logs      # 日志
+```
+
+系统默认使用服务器网卡地址，无域名也可使用。绑定域名或使用反向代理后，在管理后台更新“站点根地址”，以便邮件和离线下载网络保护使用正确的访问地址。自定义端口、原生版后接 Aria2、数据保留及升级步骤见 [安装说明](EDITIONS.md)。
+
+## 开发
+
+FastAPI + SQLAlchemy + SQLite，Jinja2 + 原生 JS/CSS，无前端构建步骤。使用 Python 3.12+：
+
+```bash
+python -m venv .venv
+# Linux: source .venv/bin/activate
+# Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload --port 8000
+pytest -q
+```
+
+直接从源码启动使用开发默认配置；生产请通过安装器生成独立凭据。测试使用独立临时数据目录。更多技术信息见 [部署与构建](DEPLOY.md) 和 [项目说明](PROJECT.md)。

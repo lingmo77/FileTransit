@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+# Run from the extracted installation directory. Never sources .env as shell code.
+set -euo pipefail
+export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+die() { echo "错误：$*" >&2; exit 1; }
+[ "$(uname -s)" = Linux ] || die '仅支持 Linux 服务器'
+[ "$EUID" = 0 ] || die '请使用 sudo bash install.sh 或 sudo bash ftctl <命令>'
+[[ "$ROOT" =~ ^/[a-zA-Z0-9_./-]+$ ]] || die '安装路径只能包含英文字母、数字、/、点、下划线和短横线'
+EDITION="$(cat .edition 2>/dev/null || echo native)"
+[[ "$EDITION" = native || "$EDITION" = bundled ]] || die '无效的安装包类型'
+SERVICE="${FT_SERVICE_NAME:-$(cat .service-name 2>/dev/null || echo file-transfer)}"
+[[ "$SERVICE" =~ ^[a-zA-Z0-9_-]+$ ]] || die '无效的服务名称'
+getenv() { sed -n "s/^$1=//p" .env | tail -n 1; }
+compose() { docker compose --project-directory "$ROOT" -f "$ROOT/docker-compose.yml" "$@"; }
+check_unit() {
+    local unit="$1" expected="$2" current
+    current="$(systemctl show "$unit" -p FragmentPath --value 2>/dev/null || true)"
+    if [ -n "$current" ]; then
+        grep -Fq "$expected" "$current" || die "已有 $unit 属于其他安装，请在原目录操作"
+    fi
+}
+configure() {
+    if [ -e .env ]; then
+        [ ! -L .env ] || die '.env 不能是软链接'
+        [ -n "$(getenv FT_SECRET_KEY)" ] || die '已有 .env 缺少 FT_SECRET_KEY，请保留原密钥补全配置'
+        echo '沿用已有 .env，不重置密码、密钥或后台设置。'
+        return
+    fi
+    [ ! -e data/app.db ] || die '发现已有数据库但没有 .env，请找回原配置和密钥后再安装'
+    local password secret host port url bt_port
+    password="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+    secret="$(od -An -N48 -tx1 /dev/urandom | tr -d ' \n')"
+    port="${FT_INSTALL_PORT:-8000}"
+    [[ "$port" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535)) || die '端口无效'
+    host="$(hostname -I | awk '{print $1}')"
+    [ -n "$host" ] || host=127.0.0.1
+    [[ "$host" != *:* ]] || host="[$host]"
+    url="${FT_INSTALL_SITE_URL:-http://$host:$port}"
+    [[ "$url" =~ ^https?://[^[:space:]\'\"\#\$]+$ ]] || die '站点地址无效'
+    local tmp
+    tmp="$(mktemp "$ROOT/.env.XXXXXX")"
+    chmod 600 "$tmp"
+    cat > "$tmp" <<EOF
+FT_SECRET_KEY=$secret
+FT_ADMIN_USERNAME=admin
+FT_ADMIN_PASSWORD=$password
+FT_PORT=$port
+FT_WORKERS=4
+FT_INITIAL_SITE_URL=$url
+FT_INITIAL_OFFLINE_ENABLED=$([ "$EDITION" = bundled ] && echo true || echo false)
+EOF
+    if [ "$EDITION" = native ]; then
+        printf 'FT_DATA_DIR=%s/data\n' "$ROOT" >> "$tmp"
+    else
+        bt_port="${FT_INSTALL_BT_PORT:-16881}"
+        [[ "$bt_port" =~ ^[0-9]+$ ]] && ((bt_port >= 1024 && bt_port <= 65535 && bt_port != 6800)) || die 'BT 端口无效'
+        printf 'FT_ARIA2_BT_PORT=%s\n' "$bt_port" >> "$tmp"
+        if [ -n "${COMPOSE_PROJECT_NAME:-}" ]; then
+            [[ "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die 'Compose 项目名无效'
+            printf 'COMPOSE_PROJECT_NAME=%s\n' "$COMPOSE_PROJECT_NAME" >> "$tmp"
+        fi
+    fi
+    # Hard-link publication is atomic and refuses an existing destination.
+    ln "$tmp" .env || { rm -f "$tmp"; die '配置已由其他安装进程创建，请重试'; }
+    rm -f "$tmp"
+    echo '已生成本实例专属管理员密码和签名密钥，保存在 .env。'
+}
+runtime() {
+    if ! command -v docker >/dev/null; then
+        [ "$(uname -m)" = x86_64 ] || die '当前完整版仅支持 Linux amd64'
+        [ -f runtime/docker.tgz ] || die '缺少容器运行组件'
+        (cd runtime && sha256sum -c SHA256SUMS)
+        for tool in iptables mount; do
+            if ! command -v "$tool" >/dev/null; then
+                command -v apt-get >/dev/null || die "缺少系统工具 $tool，请先安装"
+                apt-get update
+                apt-get install -y iptables mount
+                break
+            fi
+        done
+        ! systemctl cat docker.service >/dev/null 2>&1 || die '检测到已有 Docker 服务，请先恢复其 docker 命令，不覆盖现有安装'
+        mkdir -p /usr/local/lib/file-transfer-docker /usr/local/lib/docker/cli-plugins
+        tar xzf runtime/docker.tgz -C /usr/local/lib/file-transfer-docker --strip-components=1
+        for binary in /usr/local/lib/file-transfer-docker/*; do
+            [ ! -e "/usr/local/bin/$(basename "$binary")" ] && ! command -v "$(basename "$binary")" >/dev/null || die "已有同名程序 $(basename "$binary")，停止安装以保留原环境"
+        done
+        for binary in /usr/local/lib/file-transfer-docker/*; do ln -s "$binary" /usr/local/bin/; done
+        install -m 755 runtime/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+        cat > /etc/systemd/system/docker.service <<'EOF'
+[Unit]
+Description=Docker Engine (FileTransit bundled runtime)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=notify
+Environment=PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+ExecStart=/usr/local/bin/dockerd
+Restart=on-failure
+Delegate=yes
+KillMode=process
+LimitNOFILE=1048576
+TasksMax=infinity
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload
+        systemctl enable --now docker
+    fi
+    docker info >/dev/null || die '现有 Docker 无法连接，请先启动服务；安装器不会重装或覆盖已有 Docker'
+    if ! docker compose version >/dev/null 2>&1; then
+        [ -f runtime/docker-compose ] || die '请安装 Docker Compose v2.24 或以上'
+        (cd runtime && sha256sum -c SHA256SUMS)
+        mkdir -p /usr/local/lib/docker/cli-plugins
+        install -m 755 runtime/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+    fi
+}
+native_install() {
+    command -v apt-get >/dev/null || die '原生版自动安装支持 Ubuntu 24.04+ / Debian 13+；其他发行版请手动准备 Python 3.12+ 和 venv'
+    check_unit "$SERVICE.service" "WorkingDirectory=$ROOT"
+    if ! python3 -c 'import sys,venv; assert sys.version_info >= (3,12)' 2>/dev/null || ! dpkg -s python3-venv >/dev/null 2>&1; then
+        apt-get update
+        apt-get install -y python3 python3-venv
+    fi
+    python3 -c 'import sys; assert sys.version_info >= (3,12), "需要 Python 3.12+，请使用 Ubuntu 24.04+ / Debian 13+"'
+    if ! id filetransfer >/dev/null 2>&1; then
+        ! getent passwd 10001 >/dev/null || die 'UID 10001 已占用，无法创建隔离的服务用户'
+        ! getent group 10001 >/dev/null || die 'GID 10001 已占用'
+        groupadd -g 10001 filetransfer
+        useradd -u 10001 -g 10001 -M -s /usr/sbin/nologin filetransfer
+    fi
+    [ "$(id -u filetransfer)" = 10001 ] && [ "$(id -g filetransfer)" = 10001 ] || die 'filetransfer 用户必须使用 UID/GID 10001'
+    [ -d .venv ] || python3 -m venv .venv
+    .venv/bin/python -m pip install --only-binary=:all: -r requirements.txt
+    configure
+    mkdir -p data
+    chown filetransfer:filetransfer data
+    chown root:filetransfer .env
+    chmod 640 .env
+    cat > "/etc/systemd/system/$SERVICE.service" <<EOF
+[Unit]
+Description=FileTransit native server
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=filetransfer
+Group=filetransfer
+WorkingDirectory=$ROOT
+EnvironmentFile=$ROOT/.env
+ExecStart=/bin/bash $ROOT/deploy/native-start.sh
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=40
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$ROOT/data
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable "$SERVICE"
+    systemctl restart "$SERVICE"
+    printf '%s\n' "$SERVICE" > .service-name
+}
+wait_health() {
+    local port
+    port="$(getenv FT_PORT)"; port="${port:-8000}"
+    for ((i=0; i<90; i++)); do
+        if [ "$EDITION" = bundled ]; then
+            if compose exec -T app python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=2)" >/dev/null 2>&1; then return; fi
+        elif "$ROOT/.venv/bin/python" -c "import urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://127.0.0.1:$port/healthz',timeout=2)" >/dev/null 2>&1; then
+            systemctl is-active --quiet "$SERVICE" && return
+        fi
+        sleep 2
+    done
+    die '启动健康检查超时，请运行 sudo bash ftctl logs 查看日志'
+}
+case "${1:-help}" in
+    install)
+        command -v systemctl >/dev/null || die '需要 systemd'
+        [ -d /run/systemd/system ] || die '需要以 systemd 为 PID 1 的服务器'
+        exec 9>"$ROOT/.install.lock"
+        flock -n 9 || die '另一个安装进程正在运行'
+        if [ "$EDITION" = bundled ]; then
+            runtime
+            [ -f images/SHA256SUMS ] || die '缺少镜像校验文件'
+            (cd images && sha256sum -c SHA256SUMS)
+            docker load -i images/app.tar
+            docker load -i images/aria2.tar
+            # Do not generate new secrets against an existing named volume.
+            if [ ! -e .env ] && docker volume inspect "${COMPOSE_PROJECT_NAME:-$(basename "$ROOT" | tr '[:upper:]' '[:lower:]')}_ft-data" >/dev/null 2>&1; then
+                die '发现已有数据卷但没有 .env，请找回原配置；不生成替代密钥'
+            fi
+            configure
+            compose config --quiet
+            compose up -d --no-build --pull never
+        else
+            native_install
+        fi
+        wait_health
+        echo "安装成功。访问：$(getenv FT_INITIAL_SITE_URL)"
+        echo "管理员：$(getenv FT_ADMIN_USERNAME)"
+        echo '初始密码：在本目录执行 sudo bash ftctl password 查看；首次登录后请改密。'
+        ;;
+    start|restart|stop|status|logs)
+        action="$1"
+        if [ "$EDITION" = bundled ]; then
+            case "$action" in
+                start) compose up -d --no-build --pull never;;
+                status) compose ps;;
+                logs) compose logs --tail=100 -f;;
+                *) compose "$action";;
+            esac
+        else
+            check_unit "$SERVICE.service" "WorkingDirectory=$ROOT"
+            if [ "$action" = logs ]; then journalctl -u "$SERVICE" -n 100 -f; else systemctl "$action" "$SERVICE"; fi
+        fi
+        if [ "$action" = start ] || [ "$action" = restart ]; then wait_health; fi
+        ;;
+    password) echo '这是安装时的初始密码；网页改密后请使用新密码。'; getenv FT_ADMIN_PASSWORD;;
+    *) echo '用法：sudo bash install.sh | sudo bash ftctl {install|start|stop|restart|status|logs|password}';;
+esac

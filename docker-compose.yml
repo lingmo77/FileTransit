@@ -10,8 +10,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: file-transfer:1.0
-    container_name: file-transfer
+    image: file-transfer:1.4.0
     restart: unless-stopped
     env_file:
       # .env 不存在时也能起来（此时用镜像里的默认值）
@@ -19,6 +18,8 @@ services:
         required: false
     environment:
       FT_DATA_DIR: /app/data
+      FT_PORT: 8000
+      FT_HOST: 0.0.0.0
       FT_WORKERS: ${FT_WORKERS:-4}
     ports:
       - "${FT_PORT:-8000}:8000"

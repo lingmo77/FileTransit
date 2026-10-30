@@ -1,0 +1,24 @@
+# Optional companion for a native installation. Use the installation root as project directory.
+services:
+  aria2:
+    image: ghcr.io/lingmo77/filetransit-aria2:1.4.0
+    restart: unless-stopped
+    environment:
+      FT_ARIA2_BT_PORT: ${FT_ARIA2_BT_PORT:-16881}
+      FT_ARIA2_BLOCKED_NETWORKS: ${FT_ARIA2_BLOCKED_NETWORKS:-}
+    ports:
+      - "127.0.0.1:6800:6800"
+      - "${FT_ARIA2_BT_PORT:-16881}:${FT_ARIA2_BT_PORT:-16881}/tcp"
+      - "${FT_ARIA2_BT_PORT:-16881}:${FT_ARIA2_BT_PORT:-16881}/udp"
+    volumes:
+      - ./data/offline:/downloads
+      - ./data/aria2-state:/state
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, SETPCAP]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

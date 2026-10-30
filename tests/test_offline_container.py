@@ -153,29 +153,36 @@ def test_offline_package_contains_both_images_and_downloader_sources(tmp_path, m
     (tmp_path / "OFFLINE_DOWNLOAD_PLAN.md").write_text("plan")
     (tmp_path / "docker-compose.yml").write_text("services:\n  app: {}\n")
     (tmp_path / "docker-compose.aria2.yml").write_text("services:\n  app: {}\n  aria2: {}\n")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    for name in ("docker.tgz", "docker-compose", "SHA256SUMS", "NOTICE.md"):
+        (runtime / name).write_bytes(b"runtime")
+    (tmp_path / ".env").write_text("FT_SECRET_KEY=DO-NOT-PUBLISH")
     main = tmp_path / "main.tar"
     engine = tmp_path / "engine.tar"
     main.write_bytes(b"main image")
     engine.write_bytes(b"downloader image")
     monkeypatch.setattr(package, "ROOT", tmp_path)
     monkeypatch.setattr(package, "MANIFEST", ["docker", "OFFLINE_DOWNLOAD_PLAN.md", "docker-compose.yml", "docker-compose.aria2.yml"])
-    output = package.build("test-offline", main, engine)
+    output = package.build("test-offline", main, engine, runtime)
     assert [path.name for path in output] == [
-        "file-transfer-src-test-offline.tar.gz", "file-transfer-standard-test-offline.tar.gz",
+        "file-transfer-native-test-offline.tar.gz",
         "file-transfer-with-aria2-test-offline.tar.gz"]
-    with tarfile.open(output[1]) as standard:
-        assert "file-transfer/images/file-transfer-1.0.tar" in standard.getnames()
-        assert "file-transfer/images/file-transfer-aria2-1.37.0.tar" not in standard.getnames()
-        assert package.checksum(engine) not in standard.extractfile("file-transfer/images/SHA256SUMS").read().decode()
-        assert b'aria2:' not in standard.extractfile("file-transfer/docker-compose.yml").read()
-    with tarfile.open(output[2]) as archive:
+    with tarfile.open(output[0]) as standard:
+        assert "file-transfer/images/app.tar" not in standard.getnames()
+        assert "file-transfer/images/aria2.tar" not in standard.getnames()
+        assert standard.extractfile("file-transfer/.edition").read() == b"native\n"
+    with tarfile.open(output[1]) as archive:
         names = archive.getnames()
         assert "file-transfer/docker/aria2/Dockerfile" in names
         assert not any("__pycache__" in name for name in names)
         sums = archive.extractfile("file-transfer/images/SHA256SUMS").read().decode()
         assert package.checksum(main) in sums and package.checksum(engine) in sums
-        assert "file-transfer/images/file-transfer-aria2-1.37.0.tar" in names
+        assert "file-transfer/images/aria2.tar" in names
         assert b'aria2:' in archive.extractfile("file-transfer/docker-compose.yml").read()
+        assert "file-transfer/.env" not in names
+        assert "file-transfer/runtime/docker.tgz" in names
+        assert archive.extractfile("file-transfer/.edition").read() == b"bundled\n"
 
 
 def test_package_rejects_downloader_only_archive(tmp_path):

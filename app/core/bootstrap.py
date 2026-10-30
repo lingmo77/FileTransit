@@ -82,6 +82,10 @@ def _seed_settings(session: Session) -> None:
     for key, value in DEFAULTS.items():
         if key in existing:
             continue
+        if key == "site.base_url" and settings.initial_site_url:
+            value = settings.initial_site_url
+        elif key == "offline.enabled":
+            value = settings.initial_offline_enabled
         session.add(Setting(key=key, value=json.dumps(value, ensure_ascii=False)))
     session.commit()
 
@@ -104,9 +108,8 @@ def _seed_admin(session: Session) -> None:
     session.add(admin)
     session.commit()
     logger.warning(
-        "已创建默认管理员 %s / %s —— 请登录后立即修改密码",
+        "已创建管理员 %s，请使用安装时生成的密码登录并修改密码",
         settings.admin_username,
-        settings.admin_password,
     )
 
 
