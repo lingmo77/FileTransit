@@ -8,7 +8,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: file-transfer:1.4.0
+    image: file-transfer:1.4.1
     restart: unless-stopped
     env_file:
       # .env 不存在时也能起来（此时用镜像里的默认值）
@@ -51,7 +51,7 @@ services:
       dockerfile: docker/aria2/Dockerfile
       args:
         ARIA2_VERSION: ${FT_ARIA2_PACKAGE_VERSION:-1.37.0+debian-3}
-    image: ${FT_ARIA2_IMAGE:-ghcr.io/lingmo77/filetransit-aria2:1.4.0}
+    image: ${FT_ARIA2_IMAGE:-ghcr.io/lingmo77/filetransit-aria2:1.4.1}
     restart: unless-stopped
     environment:
       FT_ARIA2_BT_PORT: ${FT_ARIA2_BT_PORT:-16881}

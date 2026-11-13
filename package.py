@@ -13,6 +13,12 @@ MANIFEST = ["app", "migrations", "deploy", "install.sh", "ftctl", "alembic.ini",
             "requirements.txt", "LICENSE", "README.md", "EDITIONS.md", "DEPLOY.md"]
 
 
+SOURCE_FILES = ["docker", "Dockerfile", "docker-compose.yml", "docker-compose.aria2.yml",
+                ".dockerignore", ".env.example", ".gitignore", ".gitattributes", "migrations",
+                "package.py", "package.sh", "quick_start.sh", "requirements-dev.txt", "pytest.ini",
+                "tests", "AGENTS.md", ".github", "RELEASE_NOTES.md", "PROJECT.md"]
+
+
 def checksum(path):
     with Path(path).open("rb") as handle:
         return hashlib.file_digest(handle, "sha256").hexdigest()
@@ -49,7 +55,7 @@ def bundled_compose():
         if line.lstrip().startswith("#"):
             continue
         if "image: ${FT_ARIA2_IMAGE:" in line:
-            line = "    image: file-transfer-aria2:1.4.0"
+            line = "    image: file-transfer-aria2:1.4.1"
         lines.append(line)
     return "\n".join(lines) + "\n"
 
@@ -66,10 +72,13 @@ def build(version, image=None, aria2_image=None, runtime=None):
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
     outputs = []
-    for kind in (["native", "with-aria2"] if image else ["native"]):
+    for kind in (["src", "with-aria2"] if image else ["src"]):
         target = dist / f"file-transfer-{kind}-{version}.tar.gz"
         with tarfile.open(target, "w:gz") as archive:
-            for entry in MANIFEST:
+            entries = list(MANIFEST)
+            if kind == "src":
+                entries.extend(name for name in SOURCE_FILES if name not in entries)
+            for entry in entries:
                 archive.add(ROOT / entry, arcname=f"file-transfer/{entry}", filter=filtered)
             add_text(archive, ".edition", "bundled\n" if kind == "with-aria2" else "native\n")
             add_text(archive, "VERSION", version + "\n")

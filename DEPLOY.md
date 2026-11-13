@@ -38,15 +38,15 @@ location / {
 开发机器没有 Docker，镜像在构建服务器构建。先运行 `.venv` 的完整 pytest 回归，再在服务器验证两个安装包，最终发布只上传两个包和 `SHA256SUMS`。
 
 ```bash
-docker build -t file-transfer:1.4.0 .
-docker build -f docker/aria2/Dockerfile -t file-transfer-aria2:1.4.0 .
+docker build -t file-transfer:1.4.1 .
+docker build -f docker/aria2/Dockerfile -t file-transfer-aria2:1.4.1 .
 mkdir -p dist
-docker save file-transfer:1.4.0 -o dist/app.tar
-docker save file-transfer-aria2:1.4.0 -o dist/aria2.tar
+docker save file-transfer:1.4.1 -o dist/app.tar
+docker save file-transfer-aria2:1.4.1 -o dist/aria2.tar
 bash deploy/prepare-runtime.sh
-python3 package.py --version 1.4.0 --image dist/app.tar --aria2-image dist/aria2.tar --runtime dist/runtime
+python3 package.py --version 1.4.1 --image dist/app.tar --aria2-image dist/aria2.tar --runtime dist/runtime
 ```
 
 `package.py` 的白名单仅包含运行代码、迁移、安装脚本和用户文档；不打包 `.github`、测试、内部审计记录、AGENTS、生产配置或用户数据。包内镜像和运行组件有独立 SHA-256 校验。Docker/Compose 的上游版本、下载地址和许可证保存在 `runtime/NOTICE.md` 及 `runtime/licenses/`；Compose 同时验证官方发布校验值。
 
-仅生成原生包可运行 `python3 package.py --version 1.4.0`。GitHub 源码继续提供完整维护资料；可选 Aria2 镜像通过现有 workflow 发布供原生用户后续接入。不得在未决定发布时推送或移动发布标签。
+仅生成原生包可运行 `python3 package.py --version 1.4.1`。GitHub 源码继续提供完整维护资料；可选 Aria2 镜像通过现有 workflow 发布供原生用户后续接入。不得在未决定发布时推送或移动发布标签。

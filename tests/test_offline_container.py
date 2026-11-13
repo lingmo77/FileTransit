@@ -164,9 +164,10 @@ def test_offline_package_contains_both_images_and_downloader_sources(tmp_path, m
     engine.write_bytes(b"downloader image")
     monkeypatch.setattr(package, "ROOT", tmp_path)
     monkeypatch.setattr(package, "MANIFEST", ["docker", "OFFLINE_DOWNLOAD_PLAN.md", "docker-compose.yml", "docker-compose.aria2.yml"])
+    monkeypatch.setattr(package, "SOURCE_FILES", ["docker-compose.yml"])
     output = package.build("test-offline", main, engine, runtime)
     assert [path.name for path in output] == [
-        "file-transfer-native-test-offline.tar.gz",
+        "file-transfer-src-test-offline.tar.gz",
         "file-transfer-with-aria2-test-offline.tar.gz"]
     with tarfile.open(output[0]) as standard:
         assert "file-transfer/images/app.tar" not in standard.getnames()

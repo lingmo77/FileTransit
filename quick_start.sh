@@ -2,11 +2,11 @@
 # Optional online bootstrap. The downloaded installer still works independently.
 set -euo pipefail
 [ "$EUID" = 0 ] || { echo '请用 sudo bash 运行' >&2; exit 1; }
-VERSION=1.4.0
+VERSION=1.4.1
 EDITION="${1:-bundled}"
 case "$EDITION" in
     bundled) PACKAGE="file-transfer-with-aria2-$VERSION.tar.gz";;
-    native) PACKAGE="file-transfer-native-$VERSION.tar.gz";;
+    native) PACKAGE="file-transfer-src-$VERSION.tar.gz";;
     *) echo '用法：quick_start.sh [bundled|native]' >&2; exit 1;;
 esac
 if [ "$EDITION" = bundled ] && [ "$(uname -m)" != x86_64 ]; then
@@ -20,7 +20,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 BASE="https://github.com/lingmo77/FileTransit/releases/download/v$VERSION"
 curl --fail --location --retry 3 "$BASE/$PACKAGE" -o "$TMP/$PACKAGE"
-curl --fail --location --retry 3 "$BASE/SHA256SUMS" -o "$TMP/SHA256SUMS"
+curl --fail --location --retry 3 "https://raw.githubusercontent.com/lingmo77/FileTransit/v$VERSION/SHA256SUMS" -o "$TMP/SHA256SUMS"
 expected="$(awk -v file="$PACKAGE" '$2 == file {print $1}' "$TMP/SHA256SUMS")"
 [[ "$expected" =~ ^[a-f0-9]{64}$ ]] || { echo '安装包校验值无效' >&2; exit 1; }
 echo "$expected  $TMP/$PACKAGE" | sha256sum -c -

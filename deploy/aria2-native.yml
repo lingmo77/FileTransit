@@ -1,7 +1,7 @@
 # Optional companion for a native installation. Use the installation root as project directory.
 services:
   aria2:
-    image: ghcr.io/lingmo77/filetransit-aria2:1.4.0
+    image: ghcr.io/lingmo77/filetransit-aria2:1.4.1
     restart: unless-stopped
     environment:
       FT_ARIA2_BT_PORT: ${FT_ARIA2_BT_PORT:-16881}

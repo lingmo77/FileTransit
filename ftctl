@@ -67,19 +67,32 @@ EOF
     rm -f "$tmp"
     echo '已生成本实例专属管理员密码和签名密钥，保存在 .env。'
 }
+ensure_iptables() {
+    export PATH="$PATH:/usr/sbin:/sbin"
+    if command -v iptables >/dev/null && command -v ip6tables >/dev/null; then return; fi
+    echo '正在安装 Docker 所需的 iptables 工具'
+    if command -v apt-get >/dev/null; then
+        apt-get update && apt-get install -y iptables
+    elif command -v dnf >/dev/null; then
+        dnf install -y /usr/sbin/iptables /usr/sbin/ip6tables
+    elif command -v yum >/dev/null; then
+        yum install -y /usr/sbin/iptables /usr/sbin/ip6tables
+    else
+        die '请安装提供 iptables 和 ip6tables 的系统软件包，然后重新运行安装'
+    fi
+    command -v iptables >/dev/null && command -v ip6tables >/dev/null || die 'iptables 工具安装不完整'
+}
 runtime() {
+    # A healthy existing engine may use a different firewall backend.
+    if ! docker info >/dev/null 2>&1; then
+        [[ -z "${DOCKER_HOST:-}" ]] || die '请先恢复指定的 Docker 主机连接'
+        ensure_iptables
+        if command -v docker >/dev/null; then systemctl start docker; fi
+    fi
     if ! command -v docker >/dev/null; then
         [ "$(uname -m)" = x86_64 ] || die '当前完整版仅支持 Linux amd64'
         [ -f runtime/docker.tgz ] || die '缺少容器运行组件'
         (cd runtime && sha256sum -c SHA256SUMS)
-        for tool in iptables mount; do
-            if ! command -v "$tool" >/dev/null; then
-                command -v apt-get >/dev/null || die "缺少系统工具 $tool，请先安装"
-                apt-get update
-                apt-get install -y iptables mount
-                break
-            fi
-        done
         ! systemctl cat docker.service >/dev/null 2>&1 || die '检测到已有 Docker 服务，请先恢复其 docker 命令，不覆盖现有安装'
         mkdir -p /usr/local/lib/file-transfer-docker /usr/local/lib/docker/cli-plugins
         tar xzf runtime/docker.tgz -C /usr/local/lib/file-transfer-docker --strip-components=1
@@ -206,6 +219,13 @@ case "${1:-help}" in
         echo "管理员：$(getenv FT_ADMIN_USERNAME)"
         echo '初始密码：在本目录执行 sudo bash ftctl password 查看；首次登录后请改密。'
         ;;
+    uninstall)
+        [ "$EDITION" = bundled ] || die '此命令适用于一键 Docker 安装包'
+        exec 9>"$ROOT/.install.lock"
+        flock -n 9 || die '另一个安装或卸载进程正在运行'
+        source "$ROOT/deploy/uninstall.sh"
+        uninstall
+        ;;
     start|restart|stop|status|logs)
         action="$1"
         if [ "$EDITION" = bundled ]; then
@@ -222,5 +242,5 @@ case "${1:-help}" in
         if [ "$action" = start ] || [ "$action" = restart ]; then wait_health; fi
         ;;
     password) echo '这是安装时的初始密码；网页改密后请使用新密码。'; getenv FT_ADMIN_PASSWORD;;
-    *) echo '用法：sudo bash install.sh | sudo bash ftctl {install|start|stop|restart|status|logs|password}';;
+    *) echo '用法：sudo bash install.sh | sudo bash ftctl {install|uninstall|start|stop|restart|status|logs|password}';;
 esac

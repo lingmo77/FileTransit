@@ -10,7 +10,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: file-transfer:1.4.0
+    image: file-transfer:1.4.1
     restart: unless-stopped
     env_file:
       # .env 不存在时也能起来（此时用镜像里的默认值）
