@@ -1,5 +1,6 @@
-# 构建：docker build -t file-transfer:1.0 .
-# 运行：docker run -d -p 8000:8000 -v ft-data:/app/data file-transfer:1.0
+# 在仓库根目录构建（上下文是根目录）：
+#   docker build -f docker/app/Dockerfile -t file-transfer:<版本> .
+# 通常直接用根目录的 docker compose，不必单独构建。
 #
 # 采用两段式构建：builder 安装锁定的二进制 wheel，最终只复制虚拟环境。
 #
@@ -46,16 +47,16 @@ WORKDIR /app
 COPY app/ ./app/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
-COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/app/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh \
     && mkdir -p /app/data \
     && chown -R app:app /app
 
-# 数据卷：SQLite 数据库与用户上传的文件都落在这里
+# 数据目录：SQLite 数据库（如使用）、用户上传的文件和签名密钥都落在这里
 VOLUME ["/app/data"]
 EXPOSE 8000
 
-USER app
+# 不设 USER：entrypoint 以 root 修正挂载目录的属主后，立即降为 app 用户运行
 
 # slim 镜像里没有 curl，用标准库探活
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

@@ -29,12 +29,12 @@ def _escape_like(value: str) -> str:
 
 def _apply_filters(stmt: Select, *, q: str | None, kind: str | None) -> Select:
     if q:
-        stmt = stmt.where(FileItem.original_name.like(f"%{_escape_like(q)}%", escape="\\"))
+        stmt = stmt.where(FileItem.original_name.ilike(f"%{_escape_like(q)}%", escape="\\"))
     if kind and kind in CATEGORY_EXTENSIONS:
         stmt = stmt.where(
             or_(
                 *[
-                    FileItem.original_name.like(f"%.{ext}", escape="\\")
+                    FileItem.original_name.ilike(f"%.{ext}", escape="\\")
                     for ext in CATEGORY_EXTENSIONS[kind]
                 ]
             )

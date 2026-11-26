@@ -1,4 +1,4 @@
-"""Installer defaults must never replace existing site values or expose passwords."""
+"""Startup defaults: seeding never replaces site values, passwords stay out of logs, secret key persists."""
 import json
 
 from sqlalchemy import create_engine
@@ -39,3 +39,38 @@ def test_generated_password_is_not_logged(tmp_path, monkeypatch, caplog):
         assert "已创建管理员" in caplog.text
     finally:
         engine.dispose()
+
+
+def _fresh_settings(tmp_path, monkeypatch):
+    from app.core import config
+
+    monkeypatch.delenv("FT_SECRET_KEY", raising=False)
+    monkeypatch.delenv("FT_DATABASE_URL", raising=False)
+    monkeypatch.delenv("FT_DB_MODE", raising=False)
+    return config, config.Settings(_env_file=None, data_dir=tmp_path)
+
+
+def test_secret_key_is_generated_once_and_reused(tmp_path, monkeypatch):
+    config, first = _fresh_settings(tmp_path, monkeypatch)
+    config._resolve_secret_key(first)
+    assert len(first.secret_key) >= 48 and first.secret_key != config.LEGACY_SECRET_KEY
+    _, second = _fresh_settings(tmp_path, monkeypatch)
+    config._resolve_secret_key(second)
+    assert second.secret_key == first.secret_key
+    assert not list(tmp_path.glob(".secret_key.*.tmp"))
+
+
+def test_explicit_secret_key_wins(tmp_path, monkeypatch):
+    config, cfg = _fresh_settings(tmp_path, monkeypatch)
+    cfg.secret_key = "from-environment"
+    config._resolve_secret_key(cfg)
+    assert cfg.secret_key == "from-environment"
+    assert not (tmp_path / ".secret_key").exists()
+
+
+def test_existing_database_without_key_keeps_legacy_default(tmp_path, monkeypatch):
+    config, cfg = _fresh_settings(tmp_path, monkeypatch)
+    (tmp_path / "app.db").write_bytes(b"")
+    config._resolve_secret_key(cfg)
+    assert cfg.secret_key == config.LEGACY_SECRET_KEY
+    assert (tmp_path / ".secret_key").read_text(encoding="utf-8") == config.LEGACY_SECRET_KEY

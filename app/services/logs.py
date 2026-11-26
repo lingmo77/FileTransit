@@ -75,10 +75,10 @@ def _filtered(
         pattern = f"%{_escape_like(q)}%"
         stmt = stmt.where(
             or_(
-                ActivityLog.username.like(pattern, escape="\\"),
-                ActivityLog.path.like(pattern, escape="\\"),
-                ActivityLog.detail.like(pattern, escape="\\"),
-                ActivityLog.target_id.like(pattern, escape="\\"),
+                ActivityLog.username.ilike(pattern, escape="\\"),
+                ActivityLog.path.ilike(pattern, escape="\\"),
+                ActivityLog.detail.ilike(pattern, escape="\\"),
+                ActivityLog.target_id.ilike(pattern, escape="\\"),
             )
         )
     if action:
@@ -88,7 +88,7 @@ def _filtered(
     if user_id:
         stmt = stmt.where(ActivityLog.user_id == user_id)
     if ip:
-        stmt = stmt.where(ActivityLog.ip_address.like(f"%{_escape_like(ip)}%", escape="\\"))
+        stmt = stmt.where(ActivityLog.ip_address.ilike(f"%{_escape_like(ip)}%", escape="\\"))
     if start:
         stmt = stmt.where(ActivityLog.created_at >= start)
     if end:

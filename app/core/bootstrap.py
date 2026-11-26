@@ -3,7 +3,8 @@
 这一步是同步阻塞的，调用方需要放进线程池执行。
 
 多 worker 启动时每个进程都会跑一遍，所以整个过程用文件锁串行化：
-SQLite 同一时刻只允许一个写入者，并发跑迁移会直接报 ``database is locked``。
+SQLite 同一时刻只允许一个写入者，并发跑迁移会直接报 ``database is locked``；
+PostgreSQL 并发建表同样会冲突。
 """
 
 from __future__ import annotations
@@ -14,21 +15,29 @@ import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import NullPool
 
 from ..models import Setting, User
 from ..services.settings_service import DEFAULTS
 from .config import BASE_DIR, settings
 from .security import hash_password
 
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Connection
+
 logger = logging.getLogger(__name__)
 
 #: 启动锁：等待其它进程完成迁移的最长时间（秒）
 LOCK_TIMEOUT = 180.0
+#: 启动时等待 PostgreSQL 就绪的最长时间（秒）
+DB_WAIT_TIMEOUT = 120.0
 
 
 @contextmanager
@@ -69,11 +78,16 @@ def _startup_lock(timeout: float = LOCK_TIMEOUT):
             path.unlink(missing_ok=True)
 
 
-def run_migrations() -> None:
-    """把数据库结构升级到最新版本（全新数据库会直接建好所有表）。"""
+def run_migrations(connection: Connection | None = None) -> None:
+    """把数据库结构升级到最新版本（全新数据库会直接建好所有表）。
+
+    默认作用于应用配置的数据库；传入 ``connection`` 时改为升级这个连接指向的库
+    （迁移工具用它升级源 SQLite 的临时副本），迁移在该连接的事务里执行。
+    """
     config = AlembicConfig(str(BASE_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(BASE_DIR / "migrations"))
-    config.set_main_option("sqlalchemy.url", settings.sync_db_url)
+    if connection is not None:
+        config.attributes["connection"] = connection
     command.upgrade(config, "head")
 
 
@@ -108,13 +122,33 @@ def _seed_admin(session: Session) -> None:
     session.add(admin)
     session.commit()
     logger.warning(
-        "已创建管理员 %s，请使用安装时生成的密码登录并修改密码",
+        "已创建管理员 %s，初始密码为 FT_ADMIN_PASSWORD 的值（默认 admin），首次登录必须修改",
         settings.admin_username,
     )
 
 
+def wait_for_database(url: str, timeout: float = DB_WAIT_TIMEOUT) -> None:
+    """PostgreSQL 可能比应用晚就绪（宿主机重启后容器同时拉起），连得上再继续。"""
+    engine = create_engine(url, poolclass=NullPool)
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                with engine.connect():
+                    return
+            except OperationalError as exc:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"{timeout:.0f} 秒内连不上数据库：{exc.orig}") from exc
+                logger.info("等待数据库就绪……")
+                time.sleep(2)
+    finally:
+        engine.dispose()
+
+
 def bootstrap() -> None:
     settings.ensure_dirs()
+    if not settings.is_sqlite:
+        wait_for_database(settings.sync_db_url)
 
     with _startup_lock():
         run_migrations()

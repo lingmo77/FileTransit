@@ -1,25 +1,10 @@
-# 构建镜像时不需要的东西——尤其是 data/ 里的真实用户文件
-.git/
-.gitignore
-.github/
-
-data/
-*.db
-*.db-wal
-*.db-shm
-
-.venv/
-venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-tests/
-dist/
-
-.env
-.env.example
-docker-compose.yml
-docker-compose.aria2.yml
-Dockerfile
-.dockerignore
-*.md
+# 构建上下文是仓库根目录：默认全部排除，只放行镜像真正需要的文件，
+# 避免把 data/ 里的用户数据、.env 等带进镜像。
+*
+!app/
+!migrations/
+!alembic.ini
+!requirements.txt
+!docker/
+**/__pycache__/
+**/*.py[cod]

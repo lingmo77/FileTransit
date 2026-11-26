@@ -156,18 +156,19 @@ async def _write_activity(
 
     record = ActivityLog(
         user_id=user.id if user is not None else None,
-        username=(user.username if user is not None else username) or "anonymous",
-        action=action,
-        status=status,
-        ip_address=ip,
+        # 列宽在 PostgreSQL 中强制生效：超长输入（如登录失败时提交的账号）必须截断
+        username=((user.username if user is not None else username) or "anonymous")[:64],
+        action=action[:48],
+        status=status[:16],
+        ip_address=ip[:64] if ip else ip,
         user_agent=ua,
         browser=browser,
         os_name=os_name,
         device=device,
-        method=request.method if request is not None else None,
+        method=request.method[:8] if request is not None else None,
         path=(request.url.path[:512] if request is not None else None),
         target_type=target_type,
-        target_id=str(target_id) if target_id is not None else None,
+        target_id=str(target_id)[:64] if target_id is not None else None,
         detail=json.dumps(detail, ensure_ascii=False) if detail else None,
     )
 

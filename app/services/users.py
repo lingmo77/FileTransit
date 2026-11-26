@@ -21,8 +21,8 @@ def _filtered(q: str | None, status: str | None) -> Select:
         pattern = f"%{_escape_like(q)}%"
         stmt = stmt.where(
             or_(
-                User.username.like(pattern, escape="\\"),
-                User.email.like(pattern, escape="\\"),
+                User.username.ilike(pattern, escape="\\"),
+                User.email.ilike(pattern, escape="\\"),
             )
         )
     if status == "active":

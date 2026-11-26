@@ -1,30 +1,53 @@
-# 最简部署：
-#   cp .env.example .env   # 改掉 FT_SECRET_KEY
-#   docker compose up -d --build
+# 文件中转站完整版：网盘 + 内置 PostgreSQL + Aria2 离线下载。
 #
-# 标准版只启动网盘。可选 Aria2 离线下载版完整配置另见 docker-compose.aria2.yml，单独使用。
-# 更新不自动备份、不删除或替换现有数据卷。
+# 发布包里的同名文件由 package.py 生成：去掉这段说明和 build 段，直接使用 docker load 导入的镜像。
+# 在源码仓库中也可以直接构建并启动：docker compose up -d --build
+name: file-transfer
+
+# 配置写在本文件旁边的 .env（参考 .env.example），没有 .env 时全部使用默认值。
+# 数据全部保存在本目录的 data/ 下，备份和迁移时整个目录一起带走：
+#   data/app       网盘数据：上传的文件、签名密钥（使用 SQLite 时还有 app.db）
+#   data/postgres  内置 PostgreSQL 的数据库文件
+#   data/secrets   内置 PostgreSQL 的密码（首次启动自动生成）
+#   data/offline   离线下载的临时文件
+#   data/aria2     离线下载引擎的状态
+# 默认管理员 admin/admin，首次登录强制修改密码。
+#
+# 数据库由 .env 的 FT_DB_MODE 决定：builtin（默认，内置 PostgreSQL）、sqlite 或 external（外置 PostgreSQL）。
+# 改为 sqlite 或 external 时，请删除下面标有「内置 PostgreSQL」的三处：app 的 depends_on、
+# app 挂载的 data/secrets，以及整个 db 服务。
 
 services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile
-    image: file-transfer:1.4.1
+      dockerfile: docker/app/Dockerfile
+    image: file-transfer:1.5.0
     restart: unless-stopped
     env_file:
-      # .env 不存在时也能起来（此时用镜像里的默认值）
       - path: .env
         required: false
     environment:
+      FT_DB_MODE: ${FT_DB_MODE:-builtin}
       FT_DATA_DIR: /app/data
       FT_PORT: 8000
       FT_HOST: 0.0.0.0
       FT_WORKERS: ${FT_WORKERS:-4}
+      FT_INITIAL_OFFLINE_ENABLED: ${FT_INITIAL_OFFLINE_ENABLED:-true}
+      FT_OFFLINE_DIR: /app/offline
+      FT_ARIA2_RPC_URL: http://aria2:6800/jsonrpc
+      FT_ARIA2_RPC_SECRET_FILE: /app/offline/control/rpc-secret
     ports:
       - "${FT_PORT:-8000}:8000"
     volumes:
-      - ft-data:/app/data
+      - ./data/app:/app/data
+      - ./data/offline:/app/offline
+      # 内置 PostgreSQL：数据库密码（只读）
+      - ./data/secrets:/run/ft-secrets:ro
+    # 内置 PostgreSQL：等数据库就绪再启动网盘
+    depends_on:
+      db:
+        condition: service_healthy
     # 给正在传输的上传/下载留出收尾时间，避免重启时把大文件传输掐断
     stop_grace_period: 30s
     healthcheck:
@@ -43,5 +66,60 @@ services:
         max-size: "10m"
         max-file: "3"
 
-volumes:
-  ft-data:
+  # 内置 PostgreSQL：FT_DB_MODE 改为 sqlite 或 external 时删除整个 db 服务。
+  # 不映射端口，只有网盘容器能访问；账号和库名都是 filetransfer，密码在 data/secrets/postgres-password。
+  db:
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+    image: file-transfer-postgres:1.5.0
+    restart: unless-stopped
+    volumes:
+      - ./data/postgres:/var/lib/postgresql
+      - ./data/secrets:/run/ft-secrets
+    shm_size: 256mb
+    # 留足时间让 PostgreSQL 正常关闭，避免下次启动做崩溃恢复
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  aria2:
+    build:
+      context: .
+      dockerfile: docker/aria2/Dockerfile
+      args:
+        ARIA2_VERSION: ${FT_ARIA2_PACKAGE_VERSION:-1.37.0+debian-3}
+    image: file-transfer-aria2:1.5.0
+    restart: unless-stopped
+    environment:
+      FT_ARIA2_BT_PORT: ${FT_ARIA2_BT_PORT:-16881}
+      # 可选：额外禁止访问的 IP/CIDR；本站地址的保护来自后台“站点根地址”
+      FT_ARIA2_BLOCKED_NETWORKS: ${FT_ARIA2_BLOCKED_NETWORKS:-}
+    ports:
+      - "${FT_ARIA2_BT_PORT:-16881}:${FT_ARIA2_BT_PORT:-16881}/tcp"
+      - "${FT_ARIA2_BT_PORT:-16881}:${FT_ARIA2_BT_PORT:-16881}/udp"
+    volumes:
+      - ./data/offline:/downloads
+      - ./data/aria2:/state
+    cap_drop:
+      - ALL
+    # Aria2/watchdog drop all caps. The isolated network guard keeps NET_ADMIN only.
+    cap_add:
+      - NET_ADMIN
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+      - SETPCAP
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.templating import human_size
@@ -105,7 +105,7 @@ async def ensure_can_upload(db: AsyncSession, user: User, incoming_bytes: int, *
 async def consume(db: AsyncSession, user_id: int, size: int) -> None:
     """短写事务中串行重算、复核和消费配额，调用方随后入库并提交。
 
-    sync_usage 先取得 SQLite 写锁，直到文件入库一并提交才释放。
+    sync_usage 先取得写锁（见 core/database.py），直到文件入库一并提交才释放。
     不能使用请求鉴权时缓存的 User，也不能先添加文件再调用本函数。
     """
     await consume_many(db, user_id, [size])
@@ -136,8 +136,9 @@ async def release(db: AsyncSession, user_id: int, size: int) -> None:
         update(User)
         .where(User.id == user_id)
         .values(
-            used_files=func.max(User.used_files - 1, 0),
-            used_bytes=func.max(User.used_bytes - size, 0),
+            # 双参数 max() 只有 SQLite 有，用 CASE 保持各数据库一致
+            used_files=case((User.used_files > 1, User.used_files - 1), else_=0),
+            used_bytes=case((User.used_bytes > size, User.used_bytes - size), else_=0),
         )
     )
 
@@ -159,7 +160,7 @@ async def sync_usage(db: AsyncSession, user_id: int) -> tuple[int, int]:
     否则每次维护跑完用量都会被清零，等于白送配额。
     """
     # 必须先写后读，防止并发上传或后台重算用旧快照覆盖新用量。
-    # SQLite 的写锁由调用方的 commit/rollback 释放，文件传输不在此事务内。
+    # 写锁由调用方的 commit/rollback 释放，文件传输不在此事务内。
     await db.execute(update(User).where(User.id == user_id).values(id=User.id))
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     row = (

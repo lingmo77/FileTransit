@@ -22,6 +22,11 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+# users 被多张表外键引用，PostgreSQL 无法 DROP 重建，只有 SQLite 需要重建
+def _recreate() -> str:
+    return "always" if op.get_context().dialect.name == "sqlite" else "auto"
+
+
 def upgrade() -> None:
     # server_default 是给**已存在**的行补值用的：NOT NULL 列没有默认值就加不上去。
     # 补完就摘掉，让默认值只由 ORM 侧负责，避免以后改模型时两边打架。
@@ -29,10 +34,10 @@ def upgrade() -> None:
         "users",
         sa.Column("can_permanent", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
-    with op.batch_alter_table("users", schema=None, recreate="always") as batch_op:
+    with op.batch_alter_table("users", schema=None, recreate=_recreate()) as batch_op:
         batch_op.alter_column("can_permanent", server_default=None)
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("users", schema=None, recreate="always") as batch_op:
+    with op.batch_alter_table("users", schema=None, recreate=_recreate()) as batch_op:
         batch_op.drop_column("can_permanent")

@@ -21,10 +21,15 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def _recreate() -> str:
+    return "always" if op.get_context().dialect.name == "sqlite" else "auto"
+
+
 def upgrade() -> None:
     # SQLite 不支持 ALTER COLUMN，batch_alter_table 会重建整张表。
     # recreate="always" 是为了让 SQLite 也走重建路径，别指望原生 ALTER。
-    with op.batch_alter_table("files", schema=None, recreate="always") as batch_op:
+    # PostgreSQL 直接 ALTER，重建反而会被其它表的外键挡住。
+    with op.batch_alter_table("files", schema=None, recreate=_recreate()) as batch_op:
         batch_op.alter_column(
             "expires_at",
             existing_type=sa.DateTime(),
@@ -35,7 +40,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     # 回滚前必须先把长期有效的记录填上一个时间，否则 NOT NULL 约束会失败
     op.execute("UPDATE files SET expires_at = created_at WHERE expires_at IS NULL")
-    with op.batch_alter_table("files", schema=None, recreate="always") as batch_op:
+    with op.batch_alter_table("files", schema=None, recreate=_recreate()) as batch_op:
         batch_op.alter_column(
             "expires_at",
             existing_type=sa.DateTime(),

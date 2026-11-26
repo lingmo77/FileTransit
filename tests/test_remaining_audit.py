@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import threading
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -113,6 +114,12 @@ async def test_receive_reservation_remains_until_metadata_commit(api, user, monk
     assert (await api.upload("after-commit.bin", b"456")).status_code == 201
 
 
+# SQLite 删除最大 id 的行后会把同一个 id 分给下一条记录；PostgreSQL 的序列从不复用 id，
+# 这类「id 被复用」的竞态在 PostgreSQL 上不存在，也无法构造。
+sqlite_reuses_ids = pytest.mark.skipif(not settings.is_sqlite, reason="只有 SQLite 会复用已删除记录的 id")
+
+
+@sqlite_reuses_ids
 async def test_stale_update_cannot_modify_reused_file_id(api, user, admin, monkeypatch):
     from app.services import files
     old = (await api.upload("old-id.bin", b"old")).json()["file"]
@@ -136,6 +143,7 @@ async def test_stale_update_cannot_modify_reused_file_id(api, user, admin, monke
     assert (await admin.get(f"/api/files/{new['id']}")).json()["file"]["is_public"]
 
 
+@sqlite_reuses_ids
 async def test_double_delete_cannot_remove_reused_file_id(api, user, admin, monkeypatch):
     old = (await api.upload("old-double.bin", b"old")).json()["file"]
     async with SessionLocal() as db:
@@ -299,7 +307,8 @@ except UploadBusy:
     print("busy")
 '''
     with receive_slot(10003, 1):
-        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10, check=True)
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10, check=True,
+                                cwd=Path(__file__).resolve().parent.parent)
         assert result.stdout.strip() == "busy"
 
 

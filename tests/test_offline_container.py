@@ -144,49 +144,107 @@ def test_watchdog_pauses_without_current_network_protection(watchdog, network):
     assert ("aria2.forcePauseAll", None) in watchdog.calls
 
 
-def test_offline_package_contains_both_images_and_downloader_sources(tmp_path, monkeypatch):
-    package = load_module("offline_package", ROOT / "package.py")
-    (tmp_path / "docker/aria2").mkdir(parents=True)
-    (tmp_path / "docker/aria2/Dockerfile").write_text("FROM test\n")
-    (tmp_path / "docker/aria2/__pycache__").mkdir()
-    (tmp_path / "docker/aria2/__pycache__/bad.pyc").write_bytes(b"ignored")
-    (tmp_path / "OFFLINE_DOWNLOAD_PLAN.md").write_text("plan")
-    (tmp_path / "docker-compose.yml").write_text("services:\n  app: {}\n")
-    (tmp_path / "docker-compose.aria2.yml").write_text("services:\n  app: {}\n  aria2: {}\n")
-    runtime = tmp_path / "runtime"
-    runtime.mkdir()
-    for name in ("docker.tgz", "docker-compose", "SHA256SUMS", "NOTICE.md"):
-        (runtime / name).write_bytes(b"runtime")
+def _fake_repo(tmp_path):
+    for name in ("app/main.py", "app/__pycache__/main.pyc", "migrations/env.py",
+                 "alembic.ini", "requirements.txt", ".env.example", "data/app.db", "README.md", "LICENSE",
+                 "install.sh", "db/init-postgresql.sql", "db/init-sqlite.sql", "db/generate_init_sql.py",
+                 "tests/test_x.py", "docker/aria2/Dockerfile", "docker/env.example", "AGENTS.md",
+                 "RELEASE_NOTES.md"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(name)
     (tmp_path / ".env").write_text("FT_SECRET_KEY=DO-NOT-PUBLISH")
-    main = tmp_path / "main.tar"
-    engine = tmp_path / "engine.tar"
-    main.write_bytes(b"main image")
-    engine.write_bytes(b"downloader image")
+    (tmp_path / "docker-compose.yml").write_text((ROOT / "docker-compose.yml").read_text(encoding="utf-8"),
+                                                 encoding="utf-8")
+
+
+def test_full_package_is_compose_plus_images(tmp_path, monkeypatch):
+    package = load_module("release_package", ROOT / "package.py")
+    _fake_repo(tmp_path)
+    images = tmp_path / "images.tar"
+    images.write_bytes(b"both images")
     monkeypatch.setattr(package, "ROOT", tmp_path)
-    monkeypatch.setattr(package, "MANIFEST", ["docker", "OFFLINE_DOWNLOAD_PLAN.md", "docker-compose.yml", "docker-compose.aria2.yml"])
-    monkeypatch.setattr(package, "SOURCE_FILES", ["docker-compose.yml"])
-    output = package.build("test-offline", main, engine, runtime)
+    output = package.build("9.9.9", images, tmp_path / "out")
     assert [path.name for path in output] == [
-        "file-transfer-src-test-offline.tar.gz",
-        "file-transfer-with-aria2-test-offline.tar.gz"]
-    with tarfile.open(output[0]) as standard:
-        assert "file-transfer/images/app.tar" not in standard.getnames()
-        assert "file-transfer/images/aria2.tar" not in standard.getnames()
-        assert standard.extractfile("file-transfer/.edition").read() == b"native\n"
+        "file-transfer-src-9.9.9.tar.gz", "file-transfer-full-9.9.9.tar.gz"]
     with tarfile.open(output[1]) as archive:
-        names = archive.getnames()
-        assert "file-transfer/docker/aria2/Dockerfile" in names
-        assert not any("__pycache__" in name for name in names)
-        sums = archive.extractfile("file-transfer/images/SHA256SUMS").read().decode()
-        assert package.checksum(main) in sums and package.checksum(engine) in sums
-        assert "file-transfer/images/aria2.tar" in names
-        assert b'aria2:' in archive.extractfile("file-transfer/docker-compose.yml").read()
-        assert "file-transfer/.env" not in names
-        assert "file-transfer/runtime/docker.tgz" in names
-        assert archive.extractfile("file-transfer/.edition").read() == b"bundled\n"
+        names = set(archive.getnames())
+        assert names == {"file-transfer/docker-compose.yml", "file-transfer/.env.example",
+                         "file-transfer/README.md", "file-transfer/LICENSE", "file-transfer/VERSION",
+                         "file-transfer/db/init-postgresql.sql", "file-transfer/db/init-sqlite.sql",
+                         "file-transfer/images/file-transfer-images-9.9.9.tar"}
+        assert archive.extractfile("file-transfer/images/file-transfer-images-9.9.9.tar").read() == b"both images"
+        compose = archive.extractfile("file-transfer/docker-compose.yml").read().decode()
+        env_example = archive.extractfile("file-transfer/.env.example").read().decode()
+    assert env_example == "docker/env.example"
+    assert "build:" not in compose and "dockerfile" not in compose
+    for image in ("file-transfer", "file-transfer-postgres", "file-transfer-aria2"):
+        assert f"image: {image}:9.9.9" in compose
+    assert compose.count("pull_policy: never") == 3
+    assert "docker load -i images/file-transfer-images-9.9.9.tar" in compose
+    # 仓库里的构建说明去掉，写给用户的说明（切换数据库时删哪几处）保留
+    assert "package.py" not in compose and "内置 PostgreSQL" in compose
+    yaml = pytest.importorskip("yaml")
+    parsed = yaml.safe_load(compose)
+    services = parsed["services"]
+    assert set(services) == {"app", "db", "aria2"}
+    assert services["app"]["environment"]["FT_DB_MODE"] == "${FT_DB_MODE:-builtin}"
+    assert services["app"]["depends_on"] == {"db": {"condition": "service_healthy"}}
+    # 数据都用目录挂载到 compose 文件旁边的 data/ 下，不用命名卷
+    assert "volumes" not in parsed
+    mounts = [mount.split(":")[0] for service in services.values() for mount in service["volumes"]]
+    assert mounts and all(mount.startswith("./data/") for mount in mounts)
 
 
-def test_package_rejects_downloader_only_archive(tmp_path):
-    package = load_module("offline_package", ROOT / "package.py")
-    with pytest.raises(ValueError, match="requires"):
-        package.build("test", aria2_image=tmp_path / "engine.tar")
+def test_source_package_contains_only_runtime_sources(tmp_path, monkeypatch):
+    package = load_module("release_package", ROOT / "package.py")
+    _fake_repo(tmp_path)
+    monkeypatch.setattr(package, "ROOT", tmp_path)
+    [output] = package.build("9.9.9", output=tmp_path / "out")
+    with tarfile.open(output) as archive:
+        names = set(archive.getnames())
+    assert {"file-transfer/app/main.py", "file-transfer/migrations/env.py", "file-transfer/alembic.ini",
+            "file-transfer/requirements.txt", "file-transfer/.env.example",
+            "file-transfer/db/init-postgresql.sql", "file-transfer/db/init-sqlite.sql",
+            "file-transfer/README.md", "file-transfer/LICENSE"} <= names
+    for excluded in ("install.sh", "tests", "docker", "AGENTS.md", ".env", "docker-compose.yml",
+                     "db/generate_init_sql.py", "data", "RELEASE_NOTES.md", "DEVELOPMENT.md"):
+        assert not any(name == f"file-transfer/{excluded}" or name.startswith(f"file-transfer/{excluded}/")
+                       for name in names), excluded
+    assert not any("__pycache__" in name for name in names)
+
+
+def test_packages_use_lf_line_endings(tmp_path, monkeypatch):
+    """Windows 上检出的 CRLF 文本文件打包后要和仓库一样是 LF，二进制文件原样保留。"""
+    package = load_module("release_package", ROOT / "package.py")
+    _fake_repo(tmp_path)
+    (tmp_path / "app/crlf.py").write_bytes(b"a = 1\r\nb = 2\r\n")
+    (tmp_path / "app/static.bin").write_bytes(b"\x00\r\n\x01")
+    monkeypatch.setattr(package, "ROOT", tmp_path)
+    [output] = package.build("9.9.9", output=tmp_path / "out")
+    with tarfile.open(output) as archive:
+        assert archive.extractfile("file-transfer/app/crlf.py").read() == b"a = 1\nb = 2\n"
+        assert archive.extractfile("file-transfer/app/static.bin").read() == b"\x00\r\n\x01"
+        assert archive.getmember("file-transfer/app/crlf.py").mode == 0o644
+
+
+def test_release_keeps_only_two_newest_versions(tmp_path, monkeypatch):
+    package = load_module("release_package", ROOT / "package.py")
+    _fake_repo(tmp_path)
+    monkeypatch.setattr(package, "ROOT", tmp_path)
+    out = tmp_path / "out"
+    (out / "notes").mkdir(parents=True)                # 不是版本目录
+    (out / "0.1.0").mkdir()                            # 版本号命名但没有发布包，不是 package.py 生成的
+    (out / "images.tar").write_bytes(b"x")
+    for version in ("1.9.0", "1.2.0", "1.10.0", "1.10.0"):  # 1.10.0 打了两次
+        package.build(version, output=out)
+    assert sorted(path.name for path in out.iterdir()) == ["0.1.0", "1.10.0", "1.9.0", "images.tar", "notes"]
+    assert sorted(path.name for path in (out / "1.10.0").iterdir()) == [
+        "SHA256SUMS", "file-transfer-src-1.10.0.tar.gz"]
+    sums = (out / "1.9.0" / "SHA256SUMS").read_text(encoding="utf-8")
+    assert sums.endswith("  file-transfer-src-1.9.0.tar.gz\n")
+
+
+def test_package_rejects_missing_image_archive(tmp_path):
+    package = load_module("release_package", ROOT / "package.py")
+    with pytest.raises(ValueError, match="Missing image archive"):
+        package.build("test", tmp_path / "missing.tar")

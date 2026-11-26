@@ -20,6 +20,11 @@ python-dotenv==1.2.4
 # ---- 数据库 ----
 SQLAlchemy[asyncio]==2.1.4
 aiosqlite==0.22.1
+# PostgreSQL 驱动（FT_DATABASE_URL 指向 PostgreSQL 时使用）：
+# asyncpg 供运行时异步访问，psycopg 供迁移与启动初始化同步访问
+asyncpg==0.32.0
+psycopg[binary]==3.3.9
+psycopg-binary==3.3.9
 greenlet==3.5.6
 alembic==1.20.0
 

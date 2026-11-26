@@ -26,6 +26,10 @@ os.environ["FT_ADMIN_PASSWORD"] = "admin"
 os.environ["FT_SESSION_TTL_HOURS"] = "24"
 # 所有请求都来自同一个 IP，限流会互相干扰；限流本身由 test_security.py 单测覆盖
 os.environ["FT_RATE_LIMIT_ENABLED"] = "false"
+# 默认跑 SQLite；设置 FT_TEST_DATABASE_URL 时整套测试改跑 PostgreSQL（external 模式）。
+# 显式赋值（含空串）可以挡住开发者 .env 里的数据库配置。
+os.environ["FT_DATABASE_URL"] = os.environ.get("FT_TEST_DATABASE_URL", "")
+os.environ["FT_DB_MODE"] = "external" if os.environ["FT_DATABASE_URL"] else "sqlite"
 
 import httpx  # noqa: E402
 
@@ -115,12 +119,31 @@ class Api:
 # --------------------------------------------------------------- 夹具
 
 
+def _reset_postgresql_schema() -> None:
+    """测试库每次从空库开始；库名必须含 test，防止误清真实数据。"""
+    from sqlalchemy import create_engine, make_url
+
+    from app.core.config import settings
+
+    if "test" not in (make_url(settings.sync_db_url).database or ""):
+        raise RuntimeError("FT_TEST_DATABASE_URL 的库名必须包含 test，测试会清空整个 public schema")
+    engine = create_engine(settings.sync_db_url, isolation_level="AUTOCOMMIT")
+    try:
+        with engine.connect() as connection:
+            connection.exec_driver_sql("DROP SCHEMA public CASCADE")
+            connection.exec_driver_sql("CREATE SCHEMA public")
+    finally:
+        engine.dispose()
+
+
 @pytest.fixture(scope="session")
 async def transport():
     from app.core.bootstrap import bootstrap
     from app.core.config import settings
 
     settings.ensure_dirs()
+    if not settings.is_sqlite:
+        await asyncio.to_thread(_reset_postgresql_schema)
     # ASGITransport 不会触发 lifespan，这里手动完成建表与种子数据
     await asyncio.to_thread(bootstrap)
 

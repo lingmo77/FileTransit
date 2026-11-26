@@ -277,7 +277,7 @@ async def _import(task_id: str, stop: threading.Event) -> None:
                 raise
             copies.append((item, stored))
         async with SessionLocal() as db:
-            # First write obtains SQLite serialization before reading user intent.
+            # First write obtains the database write lock before reading user intent.
             await quota.sync_usage(db, task.user_id)
             current = await db.get(OfflineTask, task_id, populate_existing=True)
             owner = await db.get(User, task.user_id, populate_existing=True)

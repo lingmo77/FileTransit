@@ -78,7 +78,7 @@ class UserUpdateIn(BaseModel):
     email_verified: bool | None = None
     can_permanent: bool | None = None
     quota_max_files: int | None = Field(default=None, ge=-1, le=1_000_000)
-    quota_max_bytes: int | None = Field(default=None, ge=-1)
+    quota_max_bytes: int | None = Field(default=None, ge=-1, le=2**63 - 1)
 
 
 def _serialize_user(user: User) -> dict[str, object]:
