@@ -19,6 +19,7 @@ docker/postgres/     内置 PostgreSQL 镜像：在官方镜像外包一层，�
 docker/env.example   完整版的配置模板，打包时改名为 .env.example
 docker/aria2/        离线下载引擎镜像：Dockerfile、守护进程、出口防火墙、网络保护
 tests/               pytest 回归测试；run_in_docker.sh 在服务器上用 Docker 跑完整测试
+docs/screenshots/    README 的界面预览图（不进发布包）
 docker-compose.yml   网盘 + 内置 PostgreSQL + Aria2，带 build 段，发布时由 package.py 改写
 package.py           生成两个发布包，输出到仓库旁边的 ../release/<版本>/，只保留最新两个版本
 RELEASE_NOTES.md     当前版本的发布说明（GitHub Release 正文）

@@ -1,31 +1,66 @@
 # 文件中转站
 
-上传、分享和下载临时文件，到期自动清理。访客可下载公开文件，用户登录后上传，管理员可调整配额、有效期和站点设置。完整版另带 Aria2 离线下载（HTTP/HTTPS、磁力、BT）。
+[![最新版本](https://img.shields.io/github/v/release/lingmo77/FileTransit?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/lingmo77/FileTransit/releases/latest) [![许可证](https://img.shields.io/github/license/lingmo77/FileTransit?label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-25%2B-2496ED?logo=docker&logoColor=white)
 
-**当前版本：1.5.0** · [下载安装包](https://github.com/lingmo77/FileTransit/releases/latest)
+自托管的临时文件中转网盘：上传文件、生成分享链接，到期自动删除并释放空间。适合团队内部传大文件、临时分发安装包和资料。完整版自带离线下载（HTTP/HTTPS、磁力、BT），一条 `docker compose up -d` 即可运行。
 
-| | 完整版（推荐） | 源码版 |
-| --- | --- | --- |
-| 安装包 | `file-transfer-full-1.5.0.tar.gz` | `file-transfer-src-1.5.0.tar.gz` |
-| 内容 | `docker-compose.yml`、`.env.example`、网盘 / PostgreSQL / Aria2 三个镜像、数据库初始化脚本 | 应用源码、数据库迁移与初始化脚本、`requirements.txt`、配置模板 |
-| 运行方式 | `docker load` + `docker compose up -d` | Python 虚拟环境 + uvicorn |
-| 离线下载 | 自带 | 不包含 |
-| 数据库 | 内置 PostgreSQL（默认）、SQLite 或外置 PostgreSQL | SQLite（默认）或 PostgreSQL |
-| 环境要求 | Linux amd64，Docker 25+，Compose v2.24+ | Python 3.12+ |
+![首页：最近上传的公开文件](docs/screenshots/home.png)
 
-两个版本的初始管理员都是 **admin / admin**，首次登录强制修改密码；签名密钥首次启动时自动生成并保存在数据目录。两个版本都带 SQLite → PostgreSQL 的迁移工具，见[迁移到 PostgreSQL](#迁移到-postgresql)。
+## 功能
 
-## 完整版（Docker）
+- **上传与分享**：拖拽或多选上传，单文件默认上限 20 GB；每个文件有独立分享页和直链，可选公开到首页或仅自己可见。
+- **到期自动清理**：上传时选择保留时长，到期自动删除并释放配额；管理员可让指定用户长期保存。
+- **下载友好**：访客无需登录即可下载公开文件；支持 HTTP Range 断点续传，直链可交给 IDM、迅雷、aria2 多线程下载。
+- **离线下载**（完整版）：提交 HTTP/HTTPS 链接、磁力链接或种子，由服务器下载后存入「我的文件」；可限速、限并发，并禁止访问内网地址。
+- **配额管理**：按用户限制文件数和总容量，默认值可在后台调整。
+- **管理后台**：运行概况与 7 日趋势、用户管理、文件管理、操作日志（可导出）、站点设置、邮件服务（注册验证、找回密码）。
+- **数据库可选**：完整版默认内置 PostgreSQL，也可改用 SQLite 或外置 PostgreSQL；附带 SQLite → PostgreSQL 迁移工具。
+- **其他**：浅色 / 深色主题，登录与上传限流，HTTPS 反向代理部署。
+
+## 界面预览
+
+| 我的文件 | 分享页 |
+| --- | --- |
+| ![我的文件：配额、上传区和文件列表](docs/screenshots/dashboard.png) | ![分享页：文件信息、下载和复制直链](docs/screenshots/share.png) |
+| **离线下载** | **管理后台** |
+| ![离线下载：任务进度与状态](docs/screenshots/offline.png) | ![管理后台：运行概况、7 日趋势与磁盘占用](docs/screenshots/admin.png) |
+
+<details>
+<summary>深色主题</summary>
+
+![深色主题下的我的文件](docs/screenshots/dashboard-dark.png)
+
+</details>
+
+## 快速开始
+
+服务器需要 Linux amd64、Docker 25+ 和 Compose v2.24+。从 [Releases](https://github.com/lingmo77/FileTransit/releases/latest) 下载完整版安装包，然后：
 
 ```bash
 tar xzf file-transfer-full-1.5.0.tar.gz
 cd file-transfer
 docker load -i images/file-transfer-images-1.5.0.tar
-cp .env.example .env    # 可选：要改端口、数据库等设置时再建
 docker compose up -d
 ```
 
-访问 `http://服务器地址:8000`。占用 8000 TCP 和 16881 TCP/UDP（BT），可在 `.env` 里用 `FT_PORT`、`FT_ARIA2_BT_PORT` 修改。改了 `.env` 后执行 `docker compose up -d` 生效。
+打开 `http://服务器地址:8000`，用 **admin / admin** 登录，首次登录会要求修改密码。要使用离线下载，先在后台「站点设置」里填写站点根地址。
+
+## 两个版本
+
+| | 完整版（推荐） | 源码版 |
+| --- | --- | --- |
+| 安装包 | `file-transfer-full-1.5.0.tar.gz` | `file-transfer-src-1.5.0.tar.gz` |
+| 内容 | `docker-compose.yml`、`.env.example`、网盘 / PostgreSQL / Aria2 三个镜像、数据库初始化脚本 | 应用源码、数据库迁移与初始化脚本、迁移工具、`requirements.txt`、配置模板 |
+| 运行方式 | `docker load` + `docker compose up -d` | Python 虚拟环境 + uvicorn |
+| 离线下载 | 自带 | 不包含 |
+| 数据库 | 内置 PostgreSQL（默认）、SQLite 或外置 PostgreSQL | SQLite（默认）或 PostgreSQL |
+| 环境要求 | Linux amd64，Docker 25+，Compose v2.24+ | Python 3.12+ |
+
+两个版本的初始管理员都是 **admin / admin**，签名密钥首次启动时自动生成并保存在数据目录。
+
+## 完整版（Docker）
+
+安装步骤见[快速开始](#快速开始)。配置写在 `docker-compose.yml` 旁边的 `.env` 里：不建也能启动；要改端口、数据库等设置时，`cp .env.example .env` 再修改，然后执行 `docker compose up -d` 生效。默认占用 8000 TCP 和 16881 TCP/UDP（BT），分别由 `FT_PORT`、`FT_ARIA2_BT_PORT` 修改。
 
 所有数据都在 `file-transfer/data/` 下，备份或搬家时整个目录一起带走：
 
@@ -204,6 +239,14 @@ location / {
    - 改用内置 PostgreSQL：执行 `docker compose run --rm app python -m app.tools.sqlite_to_postgresql` 导入数据，再 `docker compose up -d`。
 5. 确认网盘数据完整后，再用 `docker volume rm` 删除旧卷。
 
+## 技术栈
+
+FastAPI + Uvicorn（多 worker）、SQLAlchemy 2 异步 + Alembic 迁移、Jinja2 服务端渲染 + 原生 JS/CSS（无前端构建步骤）；离线下载基于 Aria2，运行在独立容器中。
+
 ## 开发
 
-目录结构、测试、构建与发布见 [开发说明](DEVELOPMENT.md)。
+目录结构、测试、构建与发布见 [开发说明](DEVELOPMENT.md)，版本变化见 [发布说明](RELEASE_NOTES.md) 和 [Releases](https://github.com/lingmo77/FileTransit/releases)。
+
+## 许可证
+
+[MIT](LICENSE)

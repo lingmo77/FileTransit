@@ -5,5 +5,5 @@
 - 不要每次修改代码都打包；只有用户主动要求时才执行打包操作。
 - 部署后先让用户手动测试，询问「本次修改是否通过，发布还是继续修改/新增功能」。只有用户明确决定发布，才可以推送 GitHub、移动发布标签、创建或覆盖 Release。
 - 按用户决定将一批完整修改统一发布，不得每修一个问题就自动上传。
-- 目录约定：本地 `File Transfer/` 下只有 `src/`（git 仓库，推送的就是它的内容）和 `release/`（`package.py` 生成的发布包与 `SHA256SUMS`，按版本分目录、只保留最新两个版本，不进仓库）。镜像在服务器上构建后打进完整版、随 GitHub Release 发布，不使用 GitHub Actions 或镜像仓库。项目文档只保留 `README.md`（用户）、`DEVELOPMENT.md`（维护者）和 `RELEASE_NOTES.md`（当前版本发布说明），只写当前版本的内容。
+- 目录约定：本地 `File Transfer/` 下只有 `src/`（git 仓库，推送的就是它的内容）和 `release/`（`package.py` 生成的发布包与 `SHA256SUMS`，按版本分目录、只保留最新两个版本，不进仓库）。镜像在服务器上构建后打进完整版、随 GitHub Release 发布，不使用 GitHub Actions 或镜像仓库。项目文档只保留 `README.md`（用户）、`DEVELOPMENT.md`（维护者）和 `RELEASE_NOTES.md`（当前版本发布说明），只写当前版本的内容。README 的预览图放在 `docs/screenshots/`，界面有明显变化时用演示数据重新截图替换。
 - 回退应用必须考虑数据库迁移版本的兼容性，不能直接覆盖或恢复旧数据库导致新增用户数据丢失。
