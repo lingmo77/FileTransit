@@ -16,7 +16,7 @@
           {% if manage %}
             <span>{{ item.download_count }} 次下载</span>
           {% elif item.owner %}
-            <span>{{ item.owner.username }}</span>
+            <span>{{ item.owner.display_name }}</span>
           {% endif %}
         </div>
       </div>

@@ -127,6 +127,20 @@ def _seed_admin(session: Session) -> None:
     )
 
 
+def _seed_anonymous(session: Session) -> None:
+    """匿名上传的系统账号。迁移 b5e1d7c3a9f4 已经建好；从只含表结构的初始化脚本建的库可能没有，这里补上。"""
+    from ..services.anonymous import ANONYMOUS_USERNAME
+
+    exists = session.execute(select(User.id).where(User.username == ANONYMOUS_USERNAME)).first()
+    if exists:
+        return
+    session.add(User(
+        username=ANONYMOUS_USERNAME, email="anonymous@system.invalid", password_hash="!",
+        is_admin=False, is_active=True, email_verified=True, is_system=True,
+    ))
+    session.commit()
+
+
 def wait_for_database(url: str, timeout: float = DB_WAIT_TIMEOUT) -> None:
     """PostgreSQL 可能比应用晚就绪（宿主机重启后容器同时拉起），连得上再继续。"""
     engine = create_engine(url, poolclass=NullPool)
@@ -157,6 +171,7 @@ def bootstrap() -> None:
         try:
             with Session(engine) as session:
                 _seed_settings(session)
+                _seed_anonymous(session)
                 _seed_admin(session)
         finally:
             engine.dispose()

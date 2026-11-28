@@ -58,6 +58,17 @@ def active_clause(cutoff: datetime | None = None):
     )
 
 
+async def home_visible_clause(db: AsyncSession):
+    """首页只列登录用户的公开文件；匿名上传的文件默认只能凭链接访问（后台可改为也上首页）。"""
+    from sqlalchemy import true
+
+    from . import anonymous
+
+    if await settings_service.get_bool(db, "anon.list_on_home", False):
+        return true()
+    return FileItem.user_id != await anonymous.system_user_id(db)
+
+
 class ForeverNotAllowed(Exception):
     """未获授权的用户试图设置长期有效期。"""
 
@@ -95,6 +106,7 @@ async def list_public(
         FileItem.is_deleted.is_(False),
         FileItem.is_public.is_(True),
         active_clause(),
+        await home_visible_clause(db),
     )
     stmt = _apply_filters(stmt, q=q, kind=kind)
     return await paginate(
@@ -230,6 +242,7 @@ async def public_summary(db: AsyncSession) -> tuple[int, int]:
                 FileItem.is_deleted.is_(False),
                 FileItem.is_public.is_(True),
                 active_clause(),
+                await home_visible_clause(db),
             )
         )
     ).one()

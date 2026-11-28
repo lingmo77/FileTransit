@@ -47,9 +47,9 @@ def _digest(path):
 
 
 def test_refuses_sqlite_target(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "db_mode", "sqlite")
-    monkeypatch.setattr(settings, "database_url", "")
-    with pytest.raises(tool.MigrationError, match="FT_DB_MODE"):
+    monkeypatch.setattr(settings, "builtin_db", False)
+    monkeypatch.setattr(settings, "db_host", "")
+    with pytest.raises(tool.MigrationError, match="DB_BUILTIN"):
         tool.migrate(tmp_path / "app.db")
 
 
@@ -62,7 +62,7 @@ def target_database(monkeypatch):
     with admin.connect() as connection:
         connection.exec_driver_sql(f'CREATE DATABASE "{name}"')
     url = base.set(database=name)
-    monkeypatch.setattr(settings, "database_url", url.render_as_string(hide_password=False))
+    monkeypatch.setattr(settings, "db_name", name)
     try:
         yield url
     finally:
@@ -81,7 +81,8 @@ def test_migrates_all_rows_and_keeps_source_untouched(tmp_path, target_database)
     counts = tool.migrate(source, log=messages.append)
 
     assert _digest(source) == before
-    assert counts["users"] == 2 and counts["files"] == 1 and counts["activity_logs"] == 1
+    # 用户：alice、bob，加上迁移建好的匿名上传系统账号
+    assert counts["users"] == 3 and counts["files"] == 1 and counts["activity_logs"] == 1
     assert any("activity_logs.path" in line and "截断" in line for line in messages)
     engine = create_engine(target_database, poolclass=NullPool)
     try:
@@ -110,7 +111,7 @@ def test_non_empty_target_needs_overwrite(tmp_path, target_database):
         tool.migrate(source, log=lambda _line: None)
 
     counts = tool.migrate(source, overwrite=True, log=lambda _line: None)
-    assert counts["users"] == 2
+    assert counts["users"] == 3
 
 
 @postgresql_only
@@ -128,6 +129,8 @@ def test_over_long_value_outside_logs_aborts_without_changes(tmp_path, target_da
     target = create_engine(target_database, poolclass=NullPool)
     try:
         with target.connect() as connection:
-            assert connection.scalar(select(func.count()).select_from(User.__table__)) == 0
+            # 只剩迁移建好的匿名上传系统账号，没有导入任何用户
+            assert connection.scalar(select(func.count()).select_from(User.__table__)
+                                     .where(User.__table__.c.is_system.is_(False))) == 0
     finally:
         target.dispose()

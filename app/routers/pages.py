@@ -11,7 +11,7 @@ from ..core.database import get_db
 from ..core.deps import AuthContext, get_auth, page_context, require_user_page
 from ..core.templating import CATEGORY_LABELS, templates
 from ..models import ActivityLog, UserSession, utcnow
-from ..services import account
+from ..services import account, anonymous
 from ..services import files as files_service
 from ..services import quota as quota_service
 from ..services import settings_service
@@ -184,6 +184,22 @@ async def offline_downloads(
 ) -> HTMLResponse:
     context = await page_context(request, db, auth)
     return templates.TemplateResponse(request, "offline.html", context)
+
+
+@router.get("/upload", response_class=HTMLResponse)
+async def anonymous_upload_page(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext | None = Depends(get_auth),
+):
+    """匿名上传页：后台开启匿名上传后，未登录用户在这里上传；已登录的直接去「我的文件」。"""
+    if auth is not None:
+        return RedirectResponse("/dashboard", status_code=303)
+    lim = await anonymous.limits(db)
+    if not lim.enabled:
+        raise HTTPException(404, "本站未开放匿名上传，请登录后上传")
+    context = await page_context(request, db, auth, lim=lim)
+    return templates.TemplateResponse(request, "upload.html", context)
 
 
 @router.get("/dashboard", response_class=HTMLResponse)

@@ -45,7 +45,7 @@
           <dt>文件类型</dt>
           <dd>{{ item.mime_type }}</dd>
           <dt>上传者</dt>
-          <dd>{{ item.owner.username if item.owner else '未知' }}</dd>
+          <dd>{{ item.owner.display_name if item.owner else '未知' }}</dd>
           <dt>上传时间</dt>
           <dd>{{ item.created_at | fmt_dt(cfg.timezone) }}</dd>
           <dt>过期时间</dt>

@@ -38,6 +38,9 @@
     {% if q or user_id or expired %}
       <a class="btn btn-sm btn-ghost" href="/admin/files">清除</a>
     {% endif %}
+    {% if user_id != anonymous_user_id %}
+      <a class="btn btn-sm btn-ghost" href="/admin/files?user_id={{ anonymous_user_id }}">只看匿名上传</a>
+    {% endif %}
   </form>
 
   <section class="card">
@@ -76,8 +79,13 @@
                   </div>
                 </td>
                 <td class="nowrap small">
-                  {{ item.owner.username if item.owner else '已删除用户' }}
-                  {% if item.owner %}<div class="tiny muted">#{{ item.user_id }}</div>{% endif %}
+                  {% if item.owner and item.owner.is_system %}
+                    <span class="badge">匿名用户</span>
+                    <div class="tiny muted">{{ item.uploaded_ip or '未知 IP' }}</div>
+                  {% else %}
+                    {{ item.owner.username if item.owner else '已删除用户' }}
+                    {% if item.owner %}<div class="tiny muted">#{{ item.user_id }}</div>{% endif %}
+                  {% endif %}
                 </td>
                 <td class="nowrap small">{{ item.size | human_size }}</td>
                 <td class="nowrap tiny muted">{{ item.created_at | fmt_dt(cfg.timezone) }}</td>

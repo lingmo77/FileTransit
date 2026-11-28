@@ -46,4 +46,6 @@ class ActivityLog(Base):
         Index("ix_logs_created_at", "created_at"),
         Index("ix_logs_action_created", "action", "created_at"),
         Index("ix_logs_user_created", "user_id", "created_at"),
+        # 匿名上传按 IP 统计最近 24 小时的次数和体积
+        Index("ix_logs_action_ip_created", "action", "ip_address", "created_at"),
     )

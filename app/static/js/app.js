@@ -8,6 +8,30 @@
     document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
   }
 
+  var timeFormatter = null;
+
+  /** 站点时区的格式化器；时区名无效时和服务端一样退回 UTC。 */
+  function siteTimeFormatter() {
+    if (timeFormatter) return timeFormatter;
+    var meta = document.querySelector('meta[name="site-timezone"]');
+    var options = {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    };
+    try {
+      options.timeZone = (meta && meta.content) || 'Asia/Shanghai';
+      timeFormatter = new Intl.DateTimeFormat('en-US', options);
+    } catch (err) {
+      options.timeZone = 'UTC';
+      timeFormatter = new Intl.DateTimeFormat('en-US', options);
+    }
+    return timeFormatter;
+  }
+
   var FT = (window.FT = {
     csrf: function () {
       var meta = document.querySelector('meta[name="csrf-token"]');
@@ -223,24 +247,21 @@
       return (i === 0 ? size : size.toFixed(size < 100 ? 2 : 1)) + ' ' + units[i];
     },
 
+    /**
+     * 按站点时区（后台「站点设置」，由 base.html 的 site-timezone 传入）显示时间，
+     * 与服务端渲染的 fmt_dt 一致，不随浏览器所在时区变化。格式 YYYY-MM-DD HH:mm。
+     */
     formatTime: function (iso) {
       if (!iso) return '-';
       var date = new Date(iso);
       if (isNaN(date.getTime())) return iso;
-      var pad = function (n) {
-        return String(n).padStart(2, '0');
-      };
-      return (
-        date.getFullYear() +
-        '-' +
-        pad(date.getMonth() + 1) +
-        '-' +
-        pad(date.getDate()) +
-        ' ' +
-        pad(date.getHours()) +
-        ':' +
-        pad(date.getMinutes())
-      );
+      var parts = {};
+      siteTimeFormatter()
+        .formatToParts(date)
+        .forEach(function (part) {
+          parts[part.type] = part.value;
+        });
+      return parts.year + '-' + parts.month + '-' + parts.day + ' ' + parts.hour + ':' + parts.minute;
     },
 
     logout: async function () {

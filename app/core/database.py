@@ -1,6 +1,6 @@
 """数据库引擎与会话。
 
-支持 SQLite 与 PostgreSQL，由 ``FT_DB_MODE`` 决定（见 config.py）。
+支持 SQLite 与 PostgreSQL，由 ``DB_BUILTIN`` 和 ``DB_HOST`` 等 ``DB_`` 配置决定（见 config.py）。
 
 业务代码按「同一时刻只有一个写事务」设计：配额扣减、离线任务认领等都是
 「先写一行取得写锁，再读最新状态，再决定」。

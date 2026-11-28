@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,13 +23,14 @@ def _day_start(days_ago: int = 0) -> datetime:
 async def overview(db: AsyncSession) -> dict[str, object]:
     now = utcnow()
 
-    users_total = int((await db.execute(select(func.count(User.id)))).scalar_one() or 0)
+    real = User.is_system.is_(False)  # 不统计匿名上传的系统账号
+    users_total = int((await db.execute(select(func.count(User.id)).where(real))).scalar_one() or 0)
     users_active = int(
-        (await db.execute(select(func.count(User.id)).where(User.is_active.is_(True)))).scalar_one()
+        (await db.execute(select(func.count(User.id)).where(real, User.is_active.is_(True)))).scalar_one()
         or 0
     )
     users_pending = int(
-        (await db.execute(select(func.count(User.id)).where(User.email_verified.is_(False)))).scalar_one()
+        (await db.execute(select(func.count(User.id)).where(real, User.email_verified.is_(False)))).scalar_one()
         or 0
     )
 
@@ -78,7 +79,7 @@ async def overview(db: AsyncSession) -> dict[str, object]:
         (
             await db.execute(
                 select(func.count(ActivityLog.id)).where(
-                    ActivityLog.action == Action.UPLOAD,
+                    ActivityLog.action.in_([Action.UPLOAD, Action.ANON_UPLOAD]),
                     ActivityLog.status == "success",
                     ActivityLog.created_at >= _day_start(),
                 )
@@ -108,7 +109,8 @@ async def overview(db: AsyncSession) -> dict[str, object]:
             )
             .where(
                 ActivityLog.created_at >= since,
-                ActivityLog.action.in_([Action.UPLOAD, Action.DOWNLOAD]),
+                ActivityLog.action.in_([Action.UPLOAD, Action.ANON_UPLOAD, Action.DOWNLOAD]),
+                ActivityLog.status == "success",
             )
             .group_by("day", ActivityLog.action)
         )
@@ -121,7 +123,7 @@ async def overview(db: AsyncSession) -> dict[str, object]:
     for day, action, count in rows:
         key = str(day)
         if key in buckets:
-            buckets[key]["uploads" if action == Action.UPLOAD else "downloads"] = int(count)
+            buckets[key]["downloads" if action == Action.DOWNLOAD else "uploads"] += int(count)
 
     trend = [{"date": key, **value} for key, value in buckets.items()]
     peak = max([1, *(item["uploads"] for item in trend), *(item["downloads"] for item in trend)])
@@ -131,7 +133,8 @@ async def overview(db: AsyncSession) -> dict[str, object]:
 
     top_users = (
         await db.execute(
-            select(User.username, User.used_files, User.used_bytes)
+            select(case((User.is_system.is_(True), "匿名用户"), else_=User.username).label("username"),
+                   User.used_files, User.used_bytes)
             .where(User.used_files > 0)
             .order_by(User.used_bytes.desc())
             .limit(8)

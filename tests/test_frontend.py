@@ -166,3 +166,17 @@ def test_upload_attempt_always_returns_its_slot():
     assert "function gaveUp(" in code, "缺少「没发出去也要收尾」的兜底"
     # 拼 FormData / open 和 send 两处都可能抛，都得兜住
     assert code.count("gaveUp(error);") == 2, "抛错路径没有全部兜住"
+
+
+def test_client_side_times_use_site_timezone():
+    """前端拼出来的时间（离线任务、修改文件设置弹窗）要和服务端渲染一样按站点时区显示。
+
+    之前按浏览器所在时区显示，同一个文件在「我的文件」和「离线下载」里差出一个时区。
+    """
+    base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
+    assert '<meta name="site-timezone" content="{{ cfg.timezone }}" />' in base
+    code = _code_lines((STATIC / "js" / "app.js").read_text(encoding="utf-8"))
+    assert "meta[name=\"site-timezone\"]" in code
+    assert "options.timeZone" in code and "formatToParts" in code
+    # 不再用浏览器本地时区的取值方法
+    assert "getHours()" not in code and "getDate()" not in code

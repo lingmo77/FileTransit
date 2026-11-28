@@ -45,8 +45,8 @@ def _fresh_settings(tmp_path, monkeypatch):
     from app.core import config
 
     monkeypatch.delenv("FT_SECRET_KEY", raising=False)
-    monkeypatch.delenv("FT_DATABASE_URL", raising=False)
-    monkeypatch.delenv("FT_DB_MODE", raising=False)
+    monkeypatch.delenv("DB_HOST", raising=False)
+    monkeypatch.delenv("DB_BUILTIN", raising=False)
     return config, config.Settings(_env_file=None, data_dir=tmp_path)
 
 

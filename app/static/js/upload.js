@@ -1,4 +1,6 @@
-/* 上传面板 + 我的文件管理（拖拽上传、进度、删除、修改有效期） */
+/* 上传面板 + 我的文件管理（拖拽上传、进度、删除、修改有效期）
+   同一套代码也用于匿名上传页（/upload）：dropzone 上的 data-endpoint 指定接口，
+   data-anonymous="true" 时一次只传一个文件、没有「公开分享」选项，完成后在列表里给出下载链接。 */
 (function () {
   'use strict';
 
@@ -9,6 +11,8 @@
   var queue = document.getElementById('upload-queue');
   var expiresSelect = document.getElementById('expires_hours');
   var publicCheckbox = document.getElementById('is_public');
+  var endpoint = dropzone.dataset.endpoint || '/api/files';
+  var anonymous = dropzone.dataset.anonymous === 'true';
   var maxExpireDays = parseInt(dropzone.dataset.maxExpireDays || '30', 10);
   // 永久保存的权限由后台按用户发放；管理员天然具备
   var canForever = dropzone.dataset.canForever === 'true';
@@ -16,6 +20,8 @@
   var uploadedSomething = false;
   var pending = [];
   var MAX_ACTIVE = 2;
+  // 匿名上传每个网络同时只能传一个（服务端也有同样的限制）
+  if (anonymous) MAX_ACTIVE = 1;
   function pump() {
     while (active < MAX_ACTIVE && pending.length) pending.shift()();
   }
@@ -203,10 +209,11 @@
         retry.hidden = false;
       },
 
-      done: function () {
+      done: function (file) {
         bar.style.width = '100%';
         retry.hidden = true;
         settle('done', '已完成');
+        if (anonymous && file) showLinks(el, file);
       },
       fail: function (message) {
         settle('failed', message || '失败');
@@ -219,11 +226,36 @@
     };
   }
 
+  /** 匿名上传没有「我的文件」，完成后直接把分享页和直链放在这一行里，方便复制保存 */
+  function showLinks(el, file) {
+    var box = document.createElement('div');
+    box.className = 'upload-links tiny';
+    var expires = file.expires_at ? '，' + FT.formatTime(file.expires_at) + ' 到期' : '';
+    box.appendChild(document.createTextNode('请保存下载链接' + expires + '：'));
+    [['分享页', file.detail_url], ['直链', file.download_url]].forEach(function (pair) {
+      var link = document.createElement('a');
+      link.href = pair[1];
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = pair[0];
+      var copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'btn btn-sm btn-ghost';
+      copy.textContent = '复制' + pair[0];
+      copy.addEventListener('click', function () { FT.copy(FT.absoluteUrl(pair[1])); });
+      box.appendChild(document.createTextNode(' '));
+      box.appendChild(link);
+      box.appendChild(copy);
+    });
+    el.appendChild(box);
+  }
+
   // 只更新列表和配额，保留进行中的请求以及等待/失败队列。
   var syncTimer = null;
   var syncBusy = false;
   var syncAgain = false;
   function refresh(delay) {
+    if (anonymous) return; // 匿名上传页没有文件列表和配额要同步
     if (syncBusy) { syncAgain = true; return; }
     if (syncTimer) clearTimeout(syncTimer);
     syncTimer = setTimeout(async function () {
@@ -288,7 +320,7 @@
       return;
     }
     var selectedHours = expiresSelect.value;
-    var selectedPublic = publicCheckbox.checked;
+    var selectedPublic = publicCheckbox ? publicCheckbox.checked : true;
     var row = createRow(file);
     queue.appendChild(row.el);
     queue.hidden = false;
@@ -344,9 +376,10 @@
       var form;
       try {
         form = file;
-        var params = new URLSearchParams({filename: file.name, expires_hours: selectedHours,
-          is_public: selectedPublic ? 'true' : 'false'});
-        xhr.open('POST', '/api/files?' + params.toString(), true);
+        var options = {filename: file.name, expires_hours: selectedHours};
+        if (!anonymous) options.is_public = selectedPublic ? 'true' : 'false';
+        var params = new URLSearchParams(options);
+        xhr.open('POST', endpoint + '?' + params.toString(), true);
         xhr.setRequestHeader('Content-Type', 'application/octet-stream');
         xhr.setRequestHeader('X-CSRF-Token', FT.csrf());
       } catch (error) {
@@ -433,7 +466,7 @@
         }
 
         if (xhr.status >= 200 && xhr.status < 300) {
-          row.done();
+          row.done(data && data.file);
           uploadedSomething = true;
           refresh(100);
           FT.toast('「' + file.name + '」上传完成', 'success');

@@ -587,6 +587,29 @@ async def offline_status(db: AsyncSession = Depends(get_db)) -> JSONResponse:
     return JSONResponse({"ok": True, "service": await service_status(db)})
 
 
+#: 匿名上传各项的取值范围（整数）
+ANON_RANGES = {"max_upload_mb": (1, 1048576), "max_expire_hours": (1, 24), "ip_daily_files": (0, 100000),
+               "ip_daily_mb": (0, 1073741824), "hourly_files": (0, 1000000),
+               "total_max_mb": (0, 1073741824), "max_concurrent": (1, 64)}
+
+
+def _validate_anon_settings(updates: dict) -> None:
+    for key, value in list(updates.items()):
+        if not key.startswith("anon."):
+            continue
+        name = key.removeprefix("anon.")
+        if name in {"upload_enabled", "list_on_home"}:
+            if not isinstance(value, bool):
+                raise HTTPException(400, "匿名上传开关必须为布尔值")
+            continue
+        lo, hi = ANON_RANGES[name]
+        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+            value = int(value.strip())
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or int(value) != value or not lo <= value <= hi:
+            raise HTTPException(400, f"匿名上传设置 {name} 应为 {lo}–{hi} 的整数")
+        updates[key] = int(value)
+
+
 def _validate_offline_settings(updates: dict) -> None:
     ranges = {"seed_minutes": (1, 10080), "seed_ratio": (0, 1000),
               "download_limit_mbps": (0, 1048576), "upload_limit_mbps": (0, 1048576),
@@ -645,6 +668,7 @@ async def save_settings(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有需要保存的设置")
 
     _validate_offline_settings(updates)
+    _validate_anon_settings(updates)
 
     await settings_service.set_many(db, updates, updated_by=auth.user.id)
 

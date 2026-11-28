@@ -42,6 +42,8 @@ class Action:
     OFFLINE_CREATE = "offline_create"
     OFFLINE_ACTION = "offline_action"
     OFFLINE_SAVED = "offline_saved"
+    ANON_UPLOAD = "anon_upload"
+    ANON_UPLOAD_REJECTED = "anon_upload_rejected"
 
 
 ACTION_LABELS: dict[str, str] = {
@@ -66,6 +68,8 @@ ACTION_LABELS: dict[str, str] = {
     Action.OFFLINE_CREATE: "创建离线任务",
     Action.OFFLINE_ACTION: "管理离线任务",
     Action.OFFLINE_SAVED: "离线文件保存",
+    Action.ANON_UPLOAD: "匿名上传",
+    Action.ANON_UPLOAD_REJECTED: "匿名上传被拒",
 }
 
 # ------------------------------------------------------------------ UA 解析
@@ -135,27 +139,29 @@ def parse_user_agent(ua: str | None) -> tuple[str, str, str]:
 # ------------------------------------------------------------------ 写入
 
 
-async def _write_activity(
+def build_record(
     *,
     action: str,
     user: User | None = None,
     request: Request | None = None,
     status: str = "success",
+    user_id: int | None = None,
     username: str | None = None,
     ip: str | None = None,
     ua: str | None = None,
     target_type: str | None = None,
     target_id: str | int | None = None,
     detail: dict[str, Any] | None = None,
-) -> None:
+) -> ActivityLog:
+    """构造一条日志记录但不提交；需要与业务数据同一事务写入时（如匿名上传）直接加进该会话。"""
     if request is not None:
         ip = ip or client_ip(request)
         ua = ua or user_agent(request)
 
     browser, os_name, device = parse_user_agent(ua)
 
-    record = ActivityLog(
-        user_id=user.id if user is not None else None,
+    return ActivityLog(
+        user_id=user.id if user is not None else user_id,
         # 列宽在 PostgreSQL 中强制生效：超长输入（如登录失败时提交的账号）必须截断
         username=((user.username if user is not None else username) or "anonymous")[:64],
         action=action[:48],
@@ -172,6 +178,9 @@ async def _write_activity(
         detail=json.dumps(detail, ensure_ascii=False) if detail else None,
     )
 
+
+async def _write_activity(**kwargs) -> None:
+    record = build_record(**kwargs)
     # 独立会话，保证审计记录不受主事务回滚影响
     async with SessionLocal() as session:
         session.add(record)

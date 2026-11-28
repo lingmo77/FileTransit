@@ -2,7 +2,7 @@
 --
 -- 用法：sqlite3 data/app.db < init-sqlite.sql
 --
--- 只建表结构并写入迁移版本号；默认设置和管理员 admin/admin 由应用首次启动时写入。
+-- 内容：全部表结构、迁移版本号、默认站点设置和管理员 admin / admin（首次登录强制修改密码）。
 -- 不执行本脚本也可以：应用启动时发现没有数据库会自动创建。
 -- 只能用于新文件，已有数据的库请直接启动新版应用，由它自动迁移。
 
@@ -195,6 +195,7 @@ CREATE TABLE "users" (
 	last_login_at DATETIME,
 	last_login_ip VARCHAR(64),
 	can_permanent BOOLEAN NOT NULL,
+	is_system BOOLEAN NOT NULL,
 	PRIMARY KEY (id)
 );
 
@@ -226,6 +227,8 @@ CREATE INDEX ix_files_user_id ON files (user_id);
 
 CREATE INDEX ix_logs_action_created ON activity_logs (action, created_at);
 
+CREATE INDEX ix_logs_action_ip_created ON activity_logs (action, ip_address, created_at);
+
 CREATE INDEX ix_logs_created_at ON activity_logs (created_at);
 
 CREATE INDEX ix_logs_user_created ON activity_logs (user_id, created_at);
@@ -256,6 +259,53 @@ CREATE UNIQUE INDEX ix_users_email ON users (email);
 
 CREATE UNIQUE INDEX ix_users_username ON users (username);
 
-INSERT INTO alembic_version (version_num) VALUES ('a6b9e2037c51');
+INSERT INTO alembic_version (version_num) VALUES ('b5e1d7c3a9f4');
+
+-- 默认设置与管理员
+INSERT INTO users (username, email, password_hash, is_admin, is_active, email_verified, must_change_password, can_permanent, is_system, used_files, used_bytes, created_at) VALUES ('admin', 'admin@localhost', '$2b$12$Ft0InitSqlAdminSalt00urE7fNVipFExpiINwZh5TD9dsxhQbJuK', 1, 1, 1, 1, 0, 0, 0, 0, CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('site.name', '"文件中转站"', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('site.subtitle', '"临时文件中转，到期自动销毁"', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('site.footer', '""', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('site.default_theme', '"system"', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('site.timezone', '"Asia/Shanghai"', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('site.announcement', '""', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('site.allow_guest_download', 'true', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('registration.enabled', 'true', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('registration.require_email_verification', 'true', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('quota.default_max_files', '10', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('quota.default_max_bytes', '10737418240', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('quota.max_expire_days', '30', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('quota.max_upload_mb', '20480', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('email.smtp_host', '""', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('email.smtp_port', '465', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('email.encryption', '"ssl"', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('email.username', '""', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('email.password_enc', '""', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('email.from_name', '""', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('email.from_address', '""', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('email.timeout', '20', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('logs.retention_days', '0', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('logs.max_rows', '500000', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('anon.upload_enabled', 'false', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('anon.max_upload_mb', '100', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('anon.max_expire_hours', '24', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('anon.ip_daily_files', '10', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('anon.ip_daily_mb', '1024', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('anon.hourly_files', '100', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('anon.total_max_mb', '10240', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('anon.max_concurrent', '2', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('anon.list_on_home', 'false', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.seed_enabled', 'false', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.seed_minutes', '60', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.seed_ratio', '1.0', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.download_limit_mbps', '0', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.upload_limit_mbps', '0', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.global_concurrency', '3', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.user_concurrency', '1', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.max_tasks_per_user', '20', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.temp_max_mb', '40960', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.min_free_mb', '1024', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.metadata_max_mb', '5', CURRENT_TIMESTAMP);
+INSERT INTO settings ("key", value, updated_at) VALUES ('offline.max_torrent_files', '1000', CURRENT_TIMESTAMP);
 
 COMMIT;

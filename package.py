@@ -1,15 +1,16 @@
 """Build the two release archives; never include live configuration or data.
 
-完整版：docker-compose.yml + .env.example + 一个包含网盘、内置 PostgreSQL 与 Aria2 三个镜像的 tar，
-用户只需 ``docker load`` 和 ``docker compose up -d``。镜像在构建服务器上生成并导出：
+完整版：docker-compose.yml + .env（配置文件，内置数据库首次启动时把密码写进去）+ 内置数据库的启动脚本
++ 数据库初始化脚本 + 一个包含网盘、Aria2 与官方 PostgreSQL 三个镜像的 tar，用户只需 ``docker load`` 和
+``docker compose up -d``。网盘和 Aria2 镜像在构建服务器上生成，PostgreSQL 用官方镜像原名，一起导出：
 
-    docker save file-transfer:<版本> file-transfer-postgres:<版本> file-transfer-aria2:<版本> -o images.tar
+    docker save file-transfer:<版本> file-transfer-aria2:<版本> postgres:18.7-trixie -o images.tar
     python3 package.py --version <版本> --images images.tar
 
 源码版：直接部署所需的文件（应用代码、迁移、数据库初始化脚本、依赖清单、配置模板）加说明。
 两个包解压后都是 file-transfer/ 目录。本脚本只用标准库。
 
-产物写到仓库旁边的 release/<版本>/（不进仓库），每个版本一个目录：两个包加 SHA256SUMS。
+产物写到仓库旁边的 release/<版本>/（不进仓库），每个版本一个目录：两个包和 SHA256SUMS。
 release/ 只保留版本号最新的两个版本，更旧的版本目录在打包后自动删除。
 """
 from __future__ import annotations
@@ -17,6 +18,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import json
 import re
 import shutil
 import tarfile
@@ -36,8 +38,11 @@ INIT_SQL = ["db/init-postgresql.sql", "db/init-sqlite.sql"]
 SOURCE_FILES = ["app", "migrations", "alembic.ini", "requirements.txt", ".env.example", *INIT_SQL]
 #: 两个包都附带的说明
 DOCS = ["README.md", "LICENSE"]
-#: 完整版的配置模板，在包里叫 .env.example（源码版用仓库根目录的 .env.example）
-FULL_ENV_EXAMPLE = "docker/env.example"
+#: 完整版的配置文件，在包里直接叫 .env：解压后不用复制就能 docker compose up -d
+#: （源码版带的是仓库根目录的 .env.example）
+FULL_ENV = "docker/env.example"
+#: 内置 PostgreSQL 的启动脚本：compose 把它挂进官方镜像，路径与仓库里相同
+POSTGRES_ENTRYPOINT = "docker/postgres/entrypoint.sh"
 
 
 def checksum(path):
@@ -54,7 +59,7 @@ def filtered(info):
     return info
 
 
-def add_path(archive, source, arcname):
+def add_path(archive, source, arcname, mode=None):
     """像 archive.add 一样递归添加，但文本文件统一为 LF 换行。
 
     Windows 上的 git 默认把工作区文件检出为 CRLF；不论在哪台机器打包，发布包都和仓库里一样是 LF。
@@ -69,6 +74,8 @@ def add_path(archive, source, arcname):
         for child in sorted(source.iterdir()):
             add_path(archive, child, f"{arcname}/{child.name}")
         return
+    if mode is not None:
+        info.mode = mode
     data = source.read_bytes()
     if b"\0" not in data:
         data = data.replace(b"\r\n", b"\n")
@@ -84,14 +91,31 @@ def add_text(archive, name, text):
     archive.addfile(info, io.BytesIO(data))
 
 
-#: 完整版里的镜像（docker save 时三个都要导出）
-IMAGES = ["file-transfer", "file-transfer-postgres", "file-transfer-aria2"]
+#: 本项目构建的镜像，标签固定为发布版本；compose 里的其他镜像（官方 PostgreSQL）保持原名原标签
+IMAGES = ["file-transfer", "file-transfer-aria2"]
+#: 允许原样引用的第三方镜像
+THIRD_PARTY_IMAGES = {"postgres"}
+
+
+def compose_images(text):
+    """compose 文件里引用的全部镜像（name:tag）。"""
+    return re.findall(r"^    image: (\S+)$", text, flags=re.M)
+
+
+def archive_images(images):
+    """docker save 导出的 tar 里有哪些镜像（manifest.json 的 RepoTags）。"""
+    try:
+        with tarfile.open(images) as archive:
+            manifest = json.load(archive.extractfile("manifest.json"))
+    except (tarfile.TarError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"{images} 不是 docker save 导出的镜像包") from exc
+    return {tag for entry in manifest for tag in entry.get("RepoTags") or []}
 
 
 def release_compose(version):
-    """去掉开头的仓库说明和 build 段，镜像标签固定为本次版本，只使用已 docker load 的镜像。
+    """去掉开头的仓库说明和 build 段，本项目镜像的标签固定为本次版本，只使用已 docker load 的镜像。
 
-    其余注释（数据目录、切换数据库时要删除哪几处）是写给用户的，原样保留。
+    官方 PostgreSQL 镜像保持原名原标签。其余注释（数据目录、切换数据库时要删除哪几处）是写给用户的，原样保留。
     """
     source = (ROOT / "docker-compose.yml").read_text(encoding="utf-8").splitlines()
     start = source.index("name: file-transfer")
@@ -105,16 +129,20 @@ def release_compose(version):
             if line.startswith("      "):
                 continue
             skip_build = False
-        match = re.fullmatch(r"    image: ([a-z0-9-]+):.+", line)
+        match = re.fullmatch(r"    image: ([a-z0-9-]+):(.+)", line)
         if match:
-            if match.group(1) not in IMAGES:
-                raise ValueError(f"docker-compose.yml 里有未知镜像 {match.group(1)}")
-            lines.append(f"    image: {match.group(1)}:{version}")
+            name, tag = match.groups()
+            if name in IMAGES:
+                lines.append(f"    image: {name}:{version}")
+            elif name in THIRD_PARTY_IMAGES:
+                lines.append(line)
+            else:
+                raise ValueError(f"docker-compose.yml 里有未知镜像 {name}")
             lines.append("    pull_policy: never")
             continue
         lines.append(line)
     header = (f"# 文件中转站 {version} 完整版\n"
-              f"#   docker load -i images/file-transfer-images-{version}.tar\n"
+              f"#   docker load -i images-{version}.tar\n"
               "#   docker compose up -d\n")
     return header + "\n".join(lines).strip("\n") + "\n"
 
@@ -142,6 +170,11 @@ def build(version, images=None, output=None):
         raise ValueError("Invalid version")
     if images is not None and not Path(images).is_file():
         raise ValueError(f"Missing image archive {images}")
+    if images is not None:
+        # compose 用到的镜像必须都在镜像包里，否则用户 docker load 之后 compose up 会失败
+        missing = set(compose_images(release_compose(version))) - archive_images(images)
+        if missing:
+            raise ValueError(f"镜像包里缺少 {'、'.join(sorted(missing))}")
     root = Path(output) if output else OUTPUT
     release = root / version
     # 重新打同一版本时先清掉旧产物，避免残留上一次的完整版
@@ -157,8 +190,10 @@ def build(version, images=None, output=None):
             add_text(archive, "VERSION", version + "\n")
             if kind == "full":
                 add_text(archive, "docker-compose.yml", release_compose(version))
-                add_path(archive, ROOT / FULL_ENV_EXAMPLE, f"{TOP}/.env.example")
-                archive.add(images, arcname=f"{TOP}/images/file-transfer-images-{version}.tar",
+                # 里面会写入数据库密码，解压出来就只给属主读写
+                add_path(archive, ROOT / FULL_ENV, f"{TOP}/.env", mode=0o600)
+                add_path(archive, ROOT / POSTGRES_ENTRYPOINT, f"{TOP}/{POSTGRES_ENTRYPOINT}", mode=0o755)
+                archive.add(images, arcname=f"{TOP}/images-{version}.tar",
                             filter=filtered)
         outputs.append(target)
         print(target.name, target.stat().st_size, checksum(target), flush=True)
@@ -173,7 +208,7 @@ if __name__ == "__main__":
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", required=True)
     parser.add_argument("--images", type=Path,
-                        help="docker save 导出的 tar，同时包含网盘和 Aria2 镜像；不给则只生成源码版")
+                        help="docker save 导出的 tar，包含网盘、Aria2 和 postgres:18.7-trixie 三个镜像；不给则只生成源码版")
     parser.add_argument("--output", type=Path, help=f"输出根目录，产物写到其中的 <版本>/ 子目录，默认 {OUTPUT}")
     args = parser.parse_args()
     build(args.version, args.images, args.output)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 from pathlib import Path
 import sys
@@ -149,7 +150,7 @@ def _fake_repo(tmp_path):
                  "alembic.ini", "requirements.txt", ".env.example", "data/app.db", "README.md", "LICENSE",
                  "install.sh", "db/init-postgresql.sql", "db/init-sqlite.sql", "db/generate_init_sql.py",
                  "tests/test_x.py", "docker/aria2/Dockerfile", "docker/env.example", "AGENTS.md",
-                 "RELEASE_NOTES.md"):
+                 "RELEASE_NOTES.md", "docker/postgres/entrypoint.sh"):
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(name)
     (tmp_path / ".env").write_text("FT_SECRET_KEY=DO-NOT-PUBLISH")
@@ -157,42 +158,82 @@ def _fake_repo(tmp_path):
                                                  encoding="utf-8")
 
 
+def _image_archive(path, tags):
+    """模拟 docker save 的产物：只要 manifest.json 里的 RepoTags。"""
+    data = json.dumps([{"RepoTags": tags}]).encode()
+    with tarfile.open(path, "w") as archive:
+        info = tarfile.TarInfo("manifest.json")
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+    return path
+
+
+FULL_TAGS = ["file-transfer:9.9.9", "file-transfer-aria2:9.9.9", "postgres:18.7-trixie"]
+
+
 def test_full_package_is_compose_plus_images(tmp_path, monkeypatch):
     package = load_module("release_package", ROOT / "package.py")
     _fake_repo(tmp_path)
-    images = tmp_path / "images.tar"
-    images.write_bytes(b"both images")
+    images = _image_archive(tmp_path / "images.tar", FULL_TAGS)
     monkeypatch.setattr(package, "ROOT", tmp_path)
     output = package.build("9.9.9", images, tmp_path / "out")
-    assert [path.name for path in output] == [
-        "file-transfer-src-9.9.9.tar.gz", "file-transfer-full-9.9.9.tar.gz"]
+    # 初始化脚本只在安装包里，版本目录里不再单独放
+    assert [path.name for path in output] == ["file-transfer-src-9.9.9.tar.gz", "file-transfer-full-9.9.9.tar.gz"]
+    assert sorted(path.name for path in (tmp_path / "out" / "9.9.9").iterdir()) == [
+        "SHA256SUMS", "file-transfer-full-9.9.9.tar.gz", "file-transfer-src-9.9.9.tar.gz"]
     with tarfile.open(output[1]) as archive:
         names = set(archive.getnames())
-        assert names == {"file-transfer/docker-compose.yml", "file-transfer/.env.example",
+        assert names == {"file-transfer/docker-compose.yml", "file-transfer/.env",
                          "file-transfer/README.md", "file-transfer/LICENSE", "file-transfer/VERSION",
                          "file-transfer/db/init-postgresql.sql", "file-transfer/db/init-sqlite.sql",
-                         "file-transfer/images/file-transfer-images-9.9.9.tar"}
-        assert archive.extractfile("file-transfer/images/file-transfer-images-9.9.9.tar").read() == b"both images"
+                         "file-transfer/docker/postgres/entrypoint.sh",
+                         "file-transfer/images-9.9.9.tar"}
+        assert archive.extractfile("file-transfer/images-9.9.9.tar").read() == images.read_bytes()
+        assert archive.getmember("file-transfer/docker/postgres/entrypoint.sh").mode == 0o755
         compose = archive.extractfile("file-transfer/docker-compose.yml").read().decode()
-        env_example = archive.extractfile("file-transfer/.env.example").read().decode()
-    assert env_example == "docker/env.example"
+        # 完整版自带 .env（来自 docker/env.example，不是仓库里的 .env），只给属主读写
+        env = archive.extractfile("file-transfer/.env").read().decode()
+        env_mode = archive.getmember("file-transfer/.env").mode
+    assert env == "docker/env.example" and env_mode == 0o600
     assert "build:" not in compose and "dockerfile" not in compose
-    for image in ("file-transfer", "file-transfer-postgres", "file-transfer-aria2"):
-        assert f"image: {image}:9.9.9" in compose
+    # 本项目的镜像固定为发布版本；内置数据库直接用官方镜像，名字和标签不改
+    assert package.compose_images(compose) == ["file-transfer:9.9.9", "postgres:18.7-trixie", "file-transfer-aria2:9.9.9"]
     assert compose.count("pull_policy: never") == 3
-    assert "docker load -i images/file-transfer-images-9.9.9.tar" in compose
+    assert "docker load -i images-9.9.9.tar" in compose
     # 仓库里的构建说明去掉，写给用户的说明（切换数据库时删哪几处）保留
     assert "package.py" not in compose and "内置 PostgreSQL" in compose
     yaml = pytest.importorskip("yaml")
     parsed = yaml.safe_load(compose)
     services = parsed["services"]
     assert set(services) == {"app", "db", "aria2"}
-    assert services["app"]["environment"]["FT_DB_MODE"] == "${FT_DB_MODE:-builtin}"
+    assert services["app"]["environment"]["DB_BUILTIN"] == "${DB_BUILTIN:-true}"
+    assert services["app"]["env_file"] == ".env"
     assert services["app"]["depends_on"] == {"db": {"condition": "service_healthy"}}
-    # 数据都用目录挂载到 compose 文件旁边的 data/ 下，不用命名卷
+    # 数据都用目录挂载到 compose 文件旁边的 data/ 下，不用命名卷；
+    # 内置数据库的密码写在 .env 里：db 可写，网盘只读，不再有单独的密码文件
     assert "volumes" not in parsed
-    mounts = [mount.split(":")[0] for service in services.values() for mount in service["volumes"]]
-    assert mounts and all(mount.startswith("./data/") for mount in mounts)
+    mounts = [mount for service in services.values() for mount in service["volumes"]]
+    env_mounts = sorted(mount for mount in mounts if mount.startswith("./.env:"))
+    assert env_mounts == ["./.env:/run/ft-env/.env", "./.env:/run/ft-env/.env:ro"]
+    assert "./.env:/run/ft-env/.env" in services["db"]["volumes"]
+    script = "./docker/postgres/entrypoint.sh:/usr/local/bin/ft-postgres-entrypoint.sh:ro"
+    assert script in services["db"]["volumes"]
+    assert services["db"]["entrypoint"] == ["sh", "/usr/local/bin/ft-postgres-entrypoint.sh"]
+    assert "pg_isready" in services["db"]["healthcheck"]["test"]
+    assert all(mount.startswith("./data/") for mount in mounts if mount not in env_mounts and mount != script)
+    assert not any("secrets" in mount for mount in mounts)
+
+
+def test_full_package_requires_every_compose_image(tmp_path, monkeypatch):
+    package = load_module("release_package", ROOT / "package.py")
+    _fake_repo(tmp_path)
+    monkeypatch.setattr(package, "ROOT", tmp_path)
+    images = _image_archive(tmp_path / "images.tar", ["file-transfer:9.9.9", "file-transfer-aria2:9.9.9"])
+    with pytest.raises(ValueError, match="缺少 postgres:18.7-trixie"):
+        package.build("9.9.9", images, tmp_path / "out")
+    (tmp_path / "junk.tar").write_bytes(b"not a tar")
+    with pytest.raises(ValueError, match="不是 docker save"):
+        package.build("9.9.9", tmp_path / "junk.tar", tmp_path / "out")
 
 
 def test_source_package_contains_only_runtime_sources(tmp_path, monkeypatch):

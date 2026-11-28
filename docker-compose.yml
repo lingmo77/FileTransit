@@ -1,34 +1,32 @@
 # 文件中转站完整版：网盘 + 内置 PostgreSQL + Aria2 离线下载。
 #
 # 发布包里的同名文件由 package.py 生成：去掉这段说明和 build 段，直接使用 docker load 导入的镜像。
-# 在源码仓库中也可以直接构建并启动：docker compose up -d --build
+# 在源码仓库中也可以直接构建并启动：cp docker/env.example .env && docker compose up -d --build
 name: file-transfer
 
-# 配置写在本文件旁边的 .env（参考 .env.example），没有 .env 时全部使用默认值。
+# 配置写在本文件旁边的 .env（安装包自带）。内置 PostgreSQL 的密码首次启动时自动生成并写进 .env，
+# 所以 .env 要和 data/ 一起备份。
 # 数据全部保存在本目录的 data/ 下，备份和迁移时整个目录一起带走：
 #   data/app       网盘数据：上传的文件、签名密钥（使用 SQLite 时还有 app.db）
 #   data/postgres  内置 PostgreSQL 的数据库文件
-#   data/secrets   内置 PostgreSQL 的密码（首次启动自动生成）
 #   data/offline   离线下载的临时文件
 #   data/aria2     离线下载引擎的状态
 # 默认管理员 admin/admin，首次登录强制修改密码。
 #
-# 数据库由 .env 的 FT_DB_MODE 决定：builtin（默认，内置 PostgreSQL）、sqlite 或 external（外置 PostgreSQL）。
-# 改为 sqlite 或 external 时，请删除下面标有「内置 PostgreSQL」的三处：app 的 depends_on、
-# app 挂载的 data/secrets，以及整个 db 服务。
+# 数据库由 .env 的 DB_BUILTIN 决定：true（默认）使用内置 PostgreSQL；false 使用 DB_HOST 等几项
+# 指向的外置 PostgreSQL（DB_HOST 为空则使用 SQLite）。
+# 改为 false 时，请删除下面标有「内置 PostgreSQL」的两处：app 的 depends_on 和整个 db 服务。
 
 services:
   app:
     build:
       context: .
       dockerfile: docker/app/Dockerfile
-    image: file-transfer:1.5.0
+    image: file-transfer:1.6.0
     restart: unless-stopped
-    env_file:
-      - path: .env
-        required: false
+    env_file: .env
     environment:
-      FT_DB_MODE: ${FT_DB_MODE:-builtin}
+      DB_BUILTIN: ${DB_BUILTIN:-true}
       FT_DATA_DIR: /app/data
       FT_PORT: 8000
       FT_HOST: 0.0.0.0
@@ -42,8 +40,8 @@ services:
     volumes:
       - ./data/app:/app/data
       - ./data/offline:/app/offline
-      # 内置 PostgreSQL：数据库密码（只读）
-      - ./data/secrets:/run/ft-secrets:ro
+      # 读取 db 服务首次启动时写进 .env 的数据库密码（只读）
+      - ./.env:/run/ft-env/.env:ro
     # 内置 PostgreSQL：等数据库就绪再启动网盘
     depends_on:
       db:
@@ -66,17 +64,31 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # 内置 PostgreSQL：FT_DB_MODE 改为 sqlite 或 external 时删除整个 db 服务。
-  # 不映射端口，只有网盘容器能访问；账号和库名都是 filetransfer，密码在 data/secrets/postgres-password。
+  # 内置 PostgreSQL：DB_BUILTIN 改为 false 时删除整个 db 服务。
+  # 直接使用官方镜像 postgres:18.7-trixie；挂进去的启动脚本在首次启动时生成随机密码、写进 .env，
+  # 再交给官方的 docker-entrypoint.sh 初始化数据库。
+  # 不映射端口，只有网盘容器能访问；账号和库名都是 filetransfer，密码是 .env 里的 DB_PASSWORD。
   db:
-    build:
-      context: .
-      dockerfile: docker/postgres/Dockerfile
-    image: file-transfer-postgres:1.5.0
+    image: postgres:18.7-trixie
     restart: unless-stopped
+    entrypoint: ["sh", "/usr/local/bin/ft-postgres-entrypoint.sh"]
+    command: ["postgres"]
+    environment:
+      POSTGRES_USER: filetransfer
+      POSTGRES_DB: filetransfer
+      FT_ENV_FILE: /run/ft-env/.env
     volumes:
       - ./data/postgres:/var/lib/postgresql
-      - ./data/secrets:/run/ft-secrets
+      # 首次启动把生成的密码写进 .env
+      - ./.env:/run/ft-env/.env
+      - ./docker/postgres/entrypoint.sh:/usr/local/bin/ft-postgres-entrypoint.sh:ro
+    # 走 TCP 检查：初始化阶段的临时实例只监听 unix socket，TCP 可连才说明正式实例已就绪
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-h", "127.0.0.1", "-U", "filetransfer", "-d", "filetransfer"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
     shm_size: 256mb
     # 留足时间让 PostgreSQL 正常关闭，避免下次启动做崩溃恢复
     stop_grace_period: 60s
@@ -92,7 +104,7 @@ services:
       dockerfile: docker/aria2/Dockerfile
       args:
         ARIA2_VERSION: ${FT_ARIA2_PACKAGE_VERSION:-1.37.0+debian-3}
-    image: file-transfer-aria2:1.5.0
+    image: file-transfer-aria2:1.6.0
     restart: unless-stopped
     environment:
       FT_ARIA2_BT_PORT: ${FT_ARIA2_BT_PORT:-16881}

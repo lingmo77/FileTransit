@@ -1,12 +1,14 @@
 -- 文件中转站 PostgreSQL 初始化脚本（根据数据库迁移自动生成，请勿手改）
 --
--- 用法：先建好空库和账号，再执行本脚本，例如
+-- 用于外置 PostgreSQL：先建好空库和账号，再导入本脚本，例如
+--   createuser -P filetransfer
 --   createdb -O filetransfer filetransfer
---   psql "postgresql://filetransfer:密码@127.0.0.1:5432/filetransfer" -v ON_ERROR_STOP=1 -f init-postgresql.sql
--- 然后在 .env 设置 FT_DB_MODE=external 和指向这个库的 FT_DATABASE_URL，再启动应用。
+--   psql -h 数据库地址 -U filetransfer -d filetransfer -q -v ON_ERROR_STOP=1 -f db/init-postgresql.sql
+-- 然后在 .env 设置 DB_BUILTIN=false 和 DB_HOST、DB_PORT、DB_NAME、DB_USER、DB_PASSWORD，再启动应用。
 --
--- 只建表结构并写入迁移版本号；默认设置和管理员 admin/admin 由应用首次启动时写入。
--- 不执行本脚本也可以：应用连上空库时会自动完成同样的初始化。
+-- 内容：全部表结构、迁移版本号、默认站点设置和管理员 admin / admin（首次登录强制修改密码）。
+-- 「站点地址」和「离线下载开关」两项由应用首次启动时按部署方式写入。
+-- 不导入本脚本也可以：应用连上空库时会自动完成同样的初始化。
 -- 只能用于空库，已有数据的库请直接启动新版应用，由它自动迁移。
 
 BEGIN;
@@ -289,5 +291,64 @@ UPDATE alembic_version SET version_num='f18a6c4d7e20' WHERE alembic_version.vers
 ALTER TABLE offline_tasks ADD COLUMN payload_ready BOOLEAN DEFAULT false NOT NULL;
 
 UPDATE alembic_version SET version_num='a6b9e2037c51' WHERE alembic_version.version_num = 'f18a6c4d7e20';
+
+-- Running upgrade a6b9e2037c51 -> b5e1d7c3a9f4
+
+ALTER TABLE users ADD COLUMN is_system BOOLEAN DEFAULT false NOT NULL;
+
+ALTER TABLE users ALTER COLUMN is_system DROP DEFAULT;
+
+INSERT INTO users (username, email, password_hash, is_admin, is_active, email_verified, must_change_password, can_permanent, used_files, used_bytes, created_at, is_system) VALUES ('@anonymous', 'anonymous@system.invalid', '!', false, true, true, false, false, 0, 0, (now() AT TIME ZONE 'utc'), true);
+
+CREATE INDEX ix_logs_action_ip_created ON activity_logs (action, ip_address, created_at);
+
+UPDATE alembic_version SET version_num='b5e1d7c3a9f4' WHERE alembic_version.version_num = 'a6b9e2037c51';
+
+-- 默认设置与管理员
+INSERT INTO users (username, email, password_hash, is_admin, is_active, email_verified, must_change_password, can_permanent, is_system, used_files, used_bytes, created_at) VALUES ('admin', 'admin@localhost', '$2b$12$Ft0InitSqlAdminSalt00urE7fNVipFExpiINwZh5TD9dsxhQbJuK', true, true, true, true, false, false, 0, 0, (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('site.name', '"文件中转站"', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('site.subtitle', '"临时文件中转，到期自动销毁"', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('site.footer', '""', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('site.default_theme', '"system"', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('site.timezone', '"Asia/Shanghai"', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('site.announcement', '""', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('site.allow_guest_download', 'true', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('registration.enabled', 'true', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('registration.require_email_verification', 'true', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('quota.default_max_files', '10', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('quota.default_max_bytes', '10737418240', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('quota.max_expire_days', '30', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('quota.max_upload_mb', '20480', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('email.smtp_host', '""', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('email.smtp_port', '465', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('email.encryption', '"ssl"', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('email.username', '""', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('email.password_enc', '""', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('email.from_name', '""', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('email.from_address', '""', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('email.timeout', '20', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('logs.retention_days', '0', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('logs.max_rows', '500000', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('anon.upload_enabled', 'false', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('anon.max_upload_mb', '100', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('anon.max_expire_hours', '24', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('anon.ip_daily_files', '10', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('anon.ip_daily_mb', '1024', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('anon.hourly_files', '100', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('anon.total_max_mb', '10240', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('anon.max_concurrent', '2', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('anon.list_on_home', 'false', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.seed_enabled', 'false', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.seed_minutes', '60', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.seed_ratio', '1.0', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.download_limit_mbps', '0', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.upload_limit_mbps', '0', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.global_concurrency', '3', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.user_concurrency', '1', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.max_tasks_per_user', '20', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.temp_max_mb', '40960', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.min_free_mb', '1024', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.metadata_max_mb', '5', (now() AT TIME ZONE 'utc'));
+INSERT INTO settings (key, value, updated_at) VALUES ('offline.max_torrent_files', '1000', (now() AT TIME ZONE 'utc'));
 
 COMMIT;

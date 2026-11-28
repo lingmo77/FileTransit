@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}匿名上传 · {{ cfg.name }}{% endblock %}
+
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>匿名上传</h1>
+      <p class="subtitle">不用登录即可上传，文件最多保存 {{ lim.max_expire_hours }} 小时，凭链接下载，到期自动删除</p>
+    </div>
+    <div class="row">
+      <a class="btn btn-sm" href="/login">{{ icon('user', 15) }} 登录后上传</a>
+    </div>
+  </div>
+
+  <div class="stat-grid" style="margin-bottom: 20px">
+    <div class="stat">
+      <div class="label">单文件上限</div>
+      <div class="value">{{ lim.max_bytes | human_size }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">每天可上传</div>
+      <div class="value">{{ lim.ip_daily_files }} 个</div>
+      <div class="hint">同一网络 24 小时内合计 {{ lim.ip_daily_bytes | human_size }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">最长保存</div>
+      <div class="value">{{ lim.max_expire_hours }} 小时</div>
+      <div class="hint">需要更大空间或更久保存，请注册账号</div>
+    </div>
+  </div>
+
+  <section class="card card-pad" style="margin-bottom: 22px">
+    <div
+      class="dropzone"
+      id="dropzone"
+      role="button"
+      tabindex="0"
+      data-endpoint="/api/anon/files"
+      data-anonymous="true"
+      data-max-upload-bytes="{{ lim.max_bytes }}"
+      data-remaining-files="-1"
+      data-remaining-bytes="-1"
+      data-max-expire-days="1"
+      data-can-forever="false"
+      aria-label="匿名上传文件：点击选择或拖拽文件到此处"
+    >
+      <div class="dz-icon">{{ icon('upload', 22) }}</div>
+      <div class="dz-title">拖拽文件到此处，或点击选择</div>
+      <div class="small muted">同时只上传一个 · 单个文件最大 {{ lim.max_bytes | human_size }}</div>
+    </div>
+    <input type="file" id="file-input" multiple hidden />
+
+    <div class="row" style="margin-top: 16px; gap: 16px">
+      <div class="field" style="margin-bottom: 0; min-width: 170px">
+        <label for="expires_hours">保留时长</label>
+        <select id="expires_hours">
+          {# 常用档位里不超过上限的几档，再补上上限本身；默认选最长 #}
+          {% set choices = [1, 6, 12, 24] | select('le', lim.max_expire_hours) | list %}
+          {% if lim.max_expire_hours not in choices %}{% set choices = choices + [lim.max_expire_hours] %}{% endif %}
+          {% for hours in choices %}
+            <option value="{{ hours }}" {% if loop.last %}selected{% endif %}>{{ '1 天' if hours == 24 else hours ~ ' 小时' }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <p class="tiny muted" style="margin: 22px 0 0; max-width: 520px">
+        上传完成后请复制并保存下载链接，匿名上传的文件不会出现在首页，也无法在别处找回。
+        上传记录（IP、浏览器、文件信息）会保存在本站日志中。
+      </p>
+    </div>
+
+    <div class="upload-queue" id="upload-queue" hidden></div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/js/upload.js?v=8"></script>
+{% endblock %}

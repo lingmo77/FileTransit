@@ -1,6 +1,6 @@
 """Alembic 环境配置。
 
-连接串统一从应用配置读取（``FT_DB_MODE`` 等数据库配置指向哪里，迁移就作用在哪里），
+连接串统一从应用配置读取（``DB_BUILTIN`` / ``DB_HOST`` 等指向哪里，迁移就作用在哪里），
 避免 alembic.ini 与应用配置两处不一致。迁移工具可以通过 ``config.attributes["connection"]``
 直接传入连接，升级另一个库。
 """

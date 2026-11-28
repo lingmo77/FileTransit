@@ -63,7 +63,7 @@
             <span class="help">影响页面上所有时间的显示</span>
           </div>
           <div class="field">
-            <label for="site-base-url">站点根地址</label>
+            <label for="site-base-url">站点地址</label>
             <input
               type="url"
               id="site-base-url"
@@ -112,23 +112,86 @@
           <span>注册需要邮箱验证<span class="tiny muted" style="display:block">需要先配置好邮件服务器</span></span>
         </label>
 
-        <label class="checkbox" style="margin-bottom: 14px">
+        <label class="checkbox">
           <input
             type="checkbox"
             name="site.allow_guest_download"
             {% if values.get('site.allow_guest_download', True) %}checked{% endif %}
           />
-          <span>允许未登录用户下载<span class="tiny muted" style="display:block">关闭后下载链接需要登录</span></span>
+          <span>允许未登录用户下载<span class="tiny muted" style="display:block">关闭后下载链接需要登录。所有下载（含匿名下载）都会记入操作日志</span></span>
         </label>
+      </div>
+    </section>
 
-        <label class="checkbox">
+    <!-- 匿名上传 -->
+    <section class="card" style="margin-bottom: 18px">
+      <div class="card-head">
+        <h2>{{ icon('upload', 17) }} 匿名上传</h2>
+        <span class="tiny muted">未登录用户的上传；每次上传和被拒绝都记入操作日志</span>
+      </div>
+      <div class="card-body">
+        <label class="checkbox" style="margin-bottom: 14px">
           <input
             type="checkbox"
-            name="site.log_anonymous_download"
-            {% if values.get('site.log_anonymous_download', True) %}checked{% endif %}
+            name="anon.upload_enabled"
+            {% if values.get('anon.upload_enabled', False) %}checked{% endif %}
           />
-          <span>记录匿名下载日志<span class="tiny muted" style="display:block">关闭可显著减少日志体积</span></span>
+          <span>允许未登录用户上传文件<span class="tiny muted" style="display:block">总开关。开启后导航栏出现「匿名上传」，文件最多保存 24 小时，凭链接下载</span></span>
         </label>
+        <label class="checkbox" style="margin-bottom: 16px">
+          <input
+            type="checkbox"
+            name="anon.list_on_home"
+            {% if values.get('anon.list_on_home', False) %}checked{% endif %}
+          />
+          <span>匿名文件显示在首页<span class="tiny muted" style="display:block">默认不显示，避免首页被匿名上传刷屏</span></span>
+        </label>
+
+        <div class="form-grid">
+          <div class="field">
+            <label for="anon-max-upload">单文件上限（MB）</label>
+            <input type="number" id="anon-max-upload" name="anon.max_upload_mb" data-type="int" min="1"
+                   value="{{ values.get('anon.max_upload_mb', 100) }}" />
+          </div>
+          <div class="field">
+            <label for="anon-expire">最长保留（小时）</label>
+            <input type="number" id="anon-expire" name="anon.max_expire_hours" data-type="int" min="1" max="24"
+                   value="{{ values.get('anon.max_expire_hours', 24) }}" />
+            <span class="help">1–24 小时，到期自动删除</span>
+          </div>
+          <div class="field">
+            <label for="anon-ip-files">每个 IP 每天文件数</label>
+            <input type="number" id="anon-ip-files" name="anon.ip_daily_files" data-type="int" min="0"
+                   value="{{ values.get('anon.ip_daily_files', 10) }}" />
+            <span class="help">按最近 24 小时统计，文件到期删除后仍计入；IPv6 按 /64 网段</span>
+          </div>
+          <div class="field">
+            <label for="anon-ip-mb">每个 IP 每天总量（MB）</label>
+            <input type="number" id="anon-ip-mb" name="anon.ip_daily_mb" data-type="int" min="0"
+                   value="{{ values.get('anon.ip_daily_mb', 1024) }}" />
+          </div>
+          <div class="field">
+            <label for="anon-hourly">全站每小时文件数</label>
+            <input type="number" id="anon-hourly" name="anon.hourly_files" data-type="int" min="0"
+                   value="{{ values.get('anon.hourly_files', 100) }}" />
+            <span class="help">所有匿名用户合计，挡住更换 IP 的批量上传</span>
+          </div>
+          <div class="field">
+            <label for="anon-total">匿名文件总空间（MB）</label>
+            <input type="number" id="anon-total" name="anon.total_max_mb" data-type="int" min="0"
+                   value="{{ values.get('anon.total_max_mb', 10240) }}" />
+            <span class="help">未到期的匿名文件合计占用上限</span>
+          </div>
+          <div class="field">
+            <label for="anon-concurrent">同时接收的匿名上传数</label>
+            <input type="number" id="anon-concurrent" name="anon.max_concurrent" data-type="int" min="1"
+                   value="{{ values.get('anon.max_concurrent', 2) }}" />
+            <span class="help">全站合计；每个 IP 同时只能传 1 个</span>
+          </div>
+        </div>
+        <p class="tiny muted" style="margin: 4px 0 0">
+          放在反向代理后面时，请在 .env 设置 FT_TRUST_PROXY=true，否则所有访客会被当成同一个 IP。
+        </p>
       </div>
     </section>
 

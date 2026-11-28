@@ -26,10 +26,21 @@ os.environ["FT_ADMIN_PASSWORD"] = "admin"
 os.environ["FT_SESSION_TTL_HOURS"] = "24"
 # 所有请求都来自同一个 IP，限流会互相干扰；限流本身由 test_security.py 单测覆盖
 os.environ["FT_RATE_LIMIT_ENABLED"] = "false"
-# 默认跑 SQLite；设置 FT_TEST_DATABASE_URL 时整套测试改跑 PostgreSQL（external 模式）。
-# 显式赋值（含空串）可以挡住开发者 .env 里的数据库配置。
-os.environ["FT_DATABASE_URL"] = os.environ.get("FT_TEST_DATABASE_URL", "")
-os.environ["FT_DB_MODE"] = "external" if os.environ["FT_DATABASE_URL"] else "sqlite"
+# 默认跑 SQLite；设置 FT_TEST_DATABASE_URL 时整套测试改跑 PostgreSQL（外置数据库），
+# 连接串拆成应用读取的 DB_HOST 等几项。显式赋值（含空串）可以挡住开发者 .env 里的数据库配置。
+from sqlalchemy.engine import make_url as _make_url  # noqa: E402
+
+_test_db = _make_url(os.environ["FT_TEST_DATABASE_URL"]) if os.environ.get("FT_TEST_DATABASE_URL") else None
+os.environ.update({
+    "DB_BUILTIN": "false",
+    "DB_HOST": (_test_db.host or "") if _test_db else "",
+    "DB_PORT": str(_test_db.port or 5432) if _test_db else "5432",
+    "DB_NAME": (_test_db.database or "") if _test_db else "",
+    "DB_USER": (_test_db.username or "") if _test_db else "",
+    "DB_PASSWORD": (_test_db.password or "") if _test_db else "",
+})
+for _legacy in ("FT_DB_MODE", "FT_DATABASE_URL"):
+    os.environ.pop(_legacy, None)
 
 import httpx  # noqa: E402
 

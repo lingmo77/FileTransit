@@ -16,7 +16,8 @@ def _escape_like(value: str) -> str:
 
 
 def _filtered(q: str | None, status: str | None) -> Select:
-    stmt = select(User)
+    # 系统账号（匿名上传）不在用户管理里出现，也不能被编辑或删除
+    stmt = select(User).where(User.is_system.is_(False))
     if q:
         pattern = f"%{_escape_like(q)}%"
         stmt = stmt.where(
@@ -55,7 +56,8 @@ async def list_users(
 
 
 async def get_user(db: AsyncSession, user_id: int) -> User | None:
-    return await db.get(User, user_id)
+    user = await db.get(User, user_id)
+    return None if user is None or user.is_system else user
 
 
 async def count_admins(db: AsyncSession, *, exclude_id: int | None = None) -> int:

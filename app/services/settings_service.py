@@ -32,11 +32,10 @@ DEFAULTS: dict[str, Any] = {
     "site.default_theme": "system",  # light | dark | system
     "site.timezone": "Asia/Shanghai",
     "site.announcement": "",
-    # 站点根地址，用于拼接邮件中的验证链接；留空则按请求自动推断
+    # 站点地址，用于拼接邮件中的验证链接；留空则按请求自动推断
     "site.base_url": "",
     # 行为开关
     "site.allow_guest_download": True,
-    "site.log_anonymous_download": True,
     "registration.enabled": True,
     "registration.require_email_verification": True,
     # 配额与有效期
@@ -56,6 +55,16 @@ DEFAULTS: dict[str, Any] = {
     # 日志
     "logs.retention_days": 0,  # 0 = 不自动清理
     "logs.max_rows": 500000,
+    # 匿名上传（未登录用户）：总开关默认关闭；以下限额防止被批量上传占满空间
+    "anon.upload_enabled": False,
+    "anon.max_upload_mb": 100,  # 单文件上限
+    "anon.max_expire_hours": 24,  # 最长保留时长，不超过 24 小时
+    "anon.ip_daily_files": 10,  # 每个 IP 24 小时内最多上传的文件数
+    "anon.ip_daily_mb": 1024,  # 每个 IP 24 小时内最多上传的总量
+    "anon.hourly_files": 100,  # 全站匿名上传每小时最多文件数（挡住换 IP 的批量攻击）
+    "anon.total_max_mb": 10240,  # 匿名文件同时占用的总空间
+    "anon.max_concurrent": 2,  # 全站同时接收的匿名上传数（每个 IP 只允许 1 个）
+    "anon.list_on_home": False,  # 匿名文件是否出现在首页（默认只能凭链接访问）
     "offline.enabled": False,
     "offline.seed_enabled": False,
     "offline.seed_minutes": 60,
@@ -204,6 +213,11 @@ async def template_settings(db: AsyncSession) -> dict[str, Any]:
         # 20 GB 就显示成 "20.00 GB"，不会被写成 20480 MB
         "max_upload_bytes": _i("quota.max_upload_mb", env_settings.max_upload_mb) * 1024 * 1024,
         "offline_enabled": _b("offline.enabled", False),
+        "anon_upload_enabled": _b("anon.upload_enabled", False),
+        "anon_max_upload_bytes": _i("anon.max_upload_mb", 100) * 1024 * 1024,
+        "anon_max_expire_hours": max(1, min(24, _i("anon.max_expire_hours", 24))),
+        "anon_ip_daily_files": _i("anon.ip_daily_files", 10),
+        "anon_ip_daily_bytes": _i("anon.ip_daily_mb", 1024) * 1024 * 1024,
         "offline_metadata_max_mb": _i("offline.metadata_max_mb", 5),
         "smtp_configured": bool(host and sender),
     }

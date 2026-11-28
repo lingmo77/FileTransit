@@ -29,13 +29,15 @@ async def find_user_by_login(db: AsyncSession, login: str) -> User | None:
     login = (login or "").strip()
     if not login:
         return None
-    stmt = select(User).where((User.username == login) | (User.email == login.lower()))
+    # 系统账号（匿名上传的 @anonymous）不能登录，也不能找回密码
+    stmt = select(User).where((User.username == login) | (User.email == login.lower()), User.is_system.is_(False))
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
 async def find_user_by_email(db: AsyncSession, email: str) -> User | None:
     return (
-        await db.execute(select(User).where(User.email == (email or "").strip().lower()))
+        await db.execute(select(User).where(User.email == (email or "").strip().lower(),
+                                            User.is_system.is_(False)))
     ).scalar_one_or_none()
 
 
@@ -87,7 +89,7 @@ async def resolve_session(
         return None
 
     user = await db.get(User, row.user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.is_system:
         return None
     return user, row
 

@@ -673,6 +673,7 @@ input[type='email'],
 input[type='password'],
 input[type='number'],
 input[type='search'],
+input[type='url'],
 input[type='date'],
 input[type='datetime-local'],
 select,
@@ -1136,6 +1137,16 @@ select {
   border-radius: var(--radius-sm);
   background: var(--surface);
   animation: card-in var(--t) both;
+}
+
+/* 匿名上传完成后给出的分享页和直链，独占一整行 */
+.upload-item .upload-links {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--muted);
 }
 
 .upload-item .name {

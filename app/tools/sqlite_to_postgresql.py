@@ -6,7 +6,7 @@
           docker compose run --rm app python -m app.tools.sqlite_to_postgresql
   源码版：.venv/bin/python -m app.tools.sqlite_to_postgresql
 
-目标是当前配置的数据库（``FT_DB_MODE=builtin`` 或 ``external``）；源默认是数据目录里的
+目标是当前配置的 PostgreSQL（``DB_BUILTIN=true``，或填写了 ``DB_HOST`` 等外置数据库配置）；源默认是数据目录里的
 ``app.db``，可以用 ``--sqlite`` 指定。源库只读：先做一份临时副本并升级到当前版本的表结构，
 再整体导入。目标库已有数据时（例如应用已经启动过、自动建好了管理员和默认设置），需要加
 ``--overwrite`` 才会先清空目标库里本应用的表。整个导入在一个事务里完成，中途出错时目标库
@@ -22,14 +22,14 @@ import tempfile
 from contextlib import closing
 from pathlib import Path
 
-from sqlalchemy import Integer, String, create_engine, func, insert, select, text
+from sqlalchemy import Integer, String, create_engine, delete, func, insert, select, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.pool import NullPool
 
 from ..core.bootstrap import run_migrations, wait_for_database
 from ..core.config import settings
 from ..core.database import WRITE_LOCK_KEY
-from ..models import Base
+from ..models import Base, User
 
 BATCH = 1000
 #: 日志表里的超长字符串直接截断（旧版 SQLite 不检查列宽）；其他表遇到超长值就报错，
@@ -96,7 +96,12 @@ def _copy(source: Connection, target: Connection, overwrite: bool, log) -> dict[
     # 与应用的写锁同一把：万一网盘没停，它的写事务会被挡住，不会和导入交错
     target.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": WRITE_LOCK_KEY})
     existing = {table.name: target.scalar(select(func.count()).select_from(table)) for table in tables}
+    # 迁移本身会建好匿名上传的系统账号，它不算「已有数据」；源库升级后也有同一个账号，导入前先删掉目标库的
+    system_users = target.scalar(select(func.count()).select_from(User).where(User.is_system.is_(True))) or 0
+    existing["users"] -= system_users
     occupied = {name: count for name, count in existing.items() if count}
+    if system_users and not occupied:
+        target.execute(delete(User).where(User.is_system.is_(True)))
     if occupied:
         if not overwrite:
             detail = "，".join(f"{name} {count} 行" for name, count in occupied.items())
@@ -139,7 +144,8 @@ def _copy(source: Connection, target: Connection, overwrite: bool, log) -> dict[
 def migrate(source: Path, *, overwrite: bool = False, log=print) -> dict[str, int]:
     """把 ``source`` 的数据导入当前配置的 PostgreSQL，返回每张表导入的行数。"""
     if settings.is_sqlite:
-        raise MigrationError("当前配置是 SQLite。请先把 FT_DB_MODE 改为 builtin 或 external，指向要迁入的 PostgreSQL")
+        raise MigrationError("当前配置是 SQLite。请先在 .env 里设置 DB_BUILTIN=true（内置 PostgreSQL），"
+                             "或填写 DB_HOST、DB_NAME、DB_USER、DB_PASSWORD（外置 PostgreSQL），指向要迁入的库")
     if not source.is_file():
         raise MigrationError(f"找不到 SQLite 数据库 {source}")
     with tempfile.TemporaryDirectory(prefix="ft-migrate-") as workdir:

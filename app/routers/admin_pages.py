@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.database import get_db
 from ..core.deps import AuthContext, page_context, require_admin_page
 from ..core.templating import templates
+from ..services import anonymous
 from ..services import files as files_service
 from ..services import logs as logs_service
 from ..services import settings_service, stats
@@ -76,6 +77,7 @@ async def files_page(
         q=q,
         user_id=user_id,
         expired=bool(expired),
+        anonymous_user_id=await anonymous.system_user_id(db),
     )
     return templates.TemplateResponse(request, "admin/files.html", context)
 

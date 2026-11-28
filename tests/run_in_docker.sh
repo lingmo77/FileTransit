@@ -9,7 +9,7 @@ set -eu
 cd "$(dirname "$0")/.."
 
 PY_IMAGE=${PY_IMAGE:-python:3.12-slim}
-PG_IMAGE=${PG_IMAGE:-postgres:18.6-trixie}
+PG_IMAGE=${PG_IMAGE:-postgres:18.7-trixie}
 NET=ft-test-net
 PG=ft-test-pg
 

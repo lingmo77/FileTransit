@@ -85,8 +85,13 @@ def _should_count(request: Request) -> bool:
     return bool(match and match.group(1) == "0")
 
 
-async def _count_download(item_id: int, *, ip: str | None, ua: str | None) -> None:
-    """响应体发完之后再记账，避免给首个字节增加延迟。"""
+async def _count_download(item_id: int, *, user_id: int | None, username: str | None,
+                          ip: str | None, ua: str | None, detail: dict) -> None:
+    """响应体发完之后再记账，避免给首个字节增加延迟。
+
+    每次计数的下载都写一条日志：未登录的记为 anonymous，带上文件名、大小、请求范围和来源页，
+    方便追查匿名下载。多线程下载只有从第 0 字节开始的那个请求计数，不会一次下载刷出几十条。
+    """
     async with SessionLocal() as db:
         await db.execute(
             update(FileItem)
@@ -95,22 +100,21 @@ async def _count_download(item_id: int, *, ip: str | None, ua: str | None) -> No
         )
         await db.commit()
 
-        if not await settings_service.get_bool(db, "site.log_anonymous_download", True):
-            return
-
     await log_activity(
         action=Action.DOWNLOAD,
         request=None,
-        username="anonymous",
+        user_id=user_id,
+        username=username or "anonymous",
         ip=ip,
         ua=ua,
         target_type="file",
         target_id=item_id,
+        detail=detail,
     )
 
 
 async def _build_response(
-    request: Request, item: FileItem, *, user_id: int | None
+    request: Request, item: FileItem, *, auth: AuthContext | None
 ) -> FileResponse:
     try:
         path = storage.resolve(item.stored_path)
@@ -144,11 +148,21 @@ async def _build_response(
 
     background = None
     if _should_count(request):
+        detail = {
+            "filename": item.original_name, "size": item.size, "public_id": item.public_id,
+            "anonymous": auth is None,
+            "range": (request.headers.get("range") or "")[:64] or None,
+            "referer": (request.headers.get("referer") or "")[:256] or None,
+            "anonymous_file": bool(item.owner and item.owner.is_system),
+        }
         background = BackgroundTask(
             _count_download,
             item.id,
+            user_id=auth.user.id if auth else None,
+            username=auth.user.username if auth else None,
             ip=client_ip(request),
             ua=user_agent(request)[:512] or None,
+            detail={k: v for k, v in detail.items() if v is not None},
         )
 
     return FileResponse(
@@ -174,7 +188,7 @@ async def _serve_download(request: Request, public_id: str) -> FileResponse:
     async with SessionLocal() as db:
         auth = await get_auth(request, db)
         item, _ = await _resolve_item(db, public_id, auth)
-        response = await _build_response(request, item, user_id=auth.user.id if auth else None)
+        response = await _build_response(request, item, auth=auth)
     return response
 
 

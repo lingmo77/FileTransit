@@ -17,7 +17,7 @@ from .core.bootstrap import bootstrap
 from .core.config import settings
 from .core.deps import CSRF_COOKIE, AdminRequired, LoginRequired, PasswordChangeRequired
 from .core.templating import STATIC_DIR, templates
-from .routers import admin, admin_pages, api_auth, download, files, pages, offline
+from .routers import admin, admin_pages, anon, api_auth, download, files, pages, offline
 from .services import cleanup, offline_worker
 
 logging.basicConfig(
@@ -44,7 +44,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    version="1.5.0",
+    version="1.6.0",
     lifespan=lifespan,
     # 生产环境不暴露交互式文档，避免泄露内部接口结构
     docs_url="/api/docs" if settings.debug else None,
@@ -173,6 +173,7 @@ app.include_router(pages.router)
 app.include_router(api_auth.router)
 app.include_router(files.router)
 app.include_router(files.me_router)
+app.include_router(anon.router)
 app.include_router(offline.router)
 app.include_router(download.router)
 app.include_router(admin.router)

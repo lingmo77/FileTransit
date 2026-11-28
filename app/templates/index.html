@@ -67,6 +67,9 @@
           <a class="btn btn-primary btn-sm" href="/dashboard">去上传第一个文件</a>
         {% else %}
           <a class="btn btn-primary btn-sm" href="/login">登录后上传</a>
+          {% if cfg.anon_upload_enabled %}
+            <a class="btn btn-sm" href="/upload">匿名上传</a>
+          {% endif %}
         {% endif %}
       {% endif %}
     </div>

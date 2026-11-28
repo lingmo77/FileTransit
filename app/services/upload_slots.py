@@ -29,7 +29,15 @@ def _lock(path):
 
 
 @contextmanager
-def receive_slot(user_id: int, reserved_bytes: int):
+def receive_slot(user_id: int | None, reserved_bytes: int, *,
+                 groups: list[tuple[str, int, str]] | None = None):
+    """占一个全站接收名额，外加每组各一个名额。
+
+    ``groups`` 是 ``(锁文件前缀, 名额数, 名额用尽时的提示)``；不传时按用户限制并发
+    （``upload_user_concurrency``）。匿名上传按 IP 与「全站匿名」两组限制。
+    """
+    if groups is None:
+        groups = [(f"user-{user_id}", settings.upload_user_concurrency, "同时接收的上传过多，请等待其他文件完成")]
     root = settings.tmp_dir / "receive-locks"
     root.mkdir(exist_ok=True)
     handles = []
@@ -37,14 +45,15 @@ def receive_slot(user_id: int, reserved_bytes: int):
     if guard is None:
         raise UploadBusy("上传繁忙，请稍后重试")
     try:
-        user_slot = None
-        for i in range(settings.upload_user_concurrency):
-            user_slot = _lock(root / f"user-{user_id}-{i}.lock")
-            if user_slot:
-                handles.append(user_slot)
-                break
-        if user_slot is None:
-            raise UploadBusy("同时接收的上传过多，请等待其他文件完成")
+        for prefix, limit, message in groups:
+            slot = None
+            for i in range(max(0, limit)):
+                slot = _lock(root / f"{prefix}-{i}.lock")
+                if slot:
+                    handles.append(slot)
+                    break
+            if slot is None:
+                raise UploadBusy(message)
         global_slot = None
         occupied = 0
         for i in range(settings.upload_concurrency):

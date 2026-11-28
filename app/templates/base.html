@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <meta name="csrf-token" content="{{ csrf_token }}" />
+    <meta name="site-timezone" content="{{ cfg.timezone }}" />
     <meta name="description" content="{{ cfg.subtitle | default(cfg.name) | striptags }}" />
     <title>{% block title %}{{ cfg.name }}{% endblock %}</title>
     <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
@@ -31,7 +32,7 @@
         root.dataset.theme = stored === 'dark' ? 'dark' : 'light';
       })();
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=12" />
+    <link rel="stylesheet" href="/static/css/style.css?v=14" />
     {% block head %}{% endblock %}
   </head>
 
@@ -95,6 +96,13 @@
               </div>
             </div>
           {% else %}
+            {% if cfg.anon_upload_enabled %}
+              <a
+                class="nav-link {% if request.url.path == '/upload' %}active{% endif %}"
+                href="/upload"
+                >匿名上传</a
+              >
+            {% endif %}
             <a
               class="nav-link {% if request.url.path == '/login' %}active{% endif %}"
               href="/login"
@@ -141,7 +149,7 @@
     </footer>
 
     <div id="toast-root" class="toast-root" aria-live="polite"></div>
-    <script src="/static/js/app.js?v=2"></script>
+    <script src="/static/js/app.js?v=3"></script>
     {% block scripts %}{% endblock %}
   </body>
 </html>

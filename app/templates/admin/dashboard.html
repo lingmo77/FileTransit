@@ -138,7 +138,7 @@
                   {% if not item.is_public %}<span class="badge badge-warning">私有</span>{% endif %}
                 </td>
                 <td class="nowrap">{{ item.size | human_size }}</td>
-                <td class="nowrap">{{ item.owner.username if item.owner else '-' }}</td>
+                <td class="nowrap">{{ item.owner.display_name if item.owner else '-' }}</td>
                 <td class="nowrap">
                   {% if item.is_expired %}
                     <span class="badge badge-danger">已过期</span>

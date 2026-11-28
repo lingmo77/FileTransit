@@ -1,4 +1,4 @@
-"""数据库选择（FT_DB_MODE）、初始化脚本与跨数据库可移植的写法。"""
+"""数据库选择（DB_BUILTIN / DB_HOST 等）、初始化脚本与跨数据库可移植的写法。"""
 from __future__ import annotations
 
 import asyncio
@@ -12,6 +12,7 @@ import pytest
 from alembic.config import Config as AlembicConfig
 from sqlalchemy import select, update
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import make_url
 
 from app.core import config
 from app.core.database import SessionLocal
@@ -22,65 +23,119 @@ from tests.conftest import create_verified_user
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _settings(tmp_path, monkeypatch, mode: str = "sqlite", url: str = "", **extra):
-    for name in ("FT_DATABASE_URL", "FT_DB_MODE", "FT_BUILTIN_DB_HOST", "FT_BUILTIN_DB_PASSWORD_FILE"):
+DB_ENV = ("DB_BUILTIN", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
+          "FT_DB_MODE", "FT_DATABASE_URL", "FT_BUILTIN_DB_HOST")
+
+
+def _clean(monkeypatch):
+    for name in DB_ENV:
         monkeypatch.delenv(name, raising=False)
-    return config.Settings(_env_file=None, data_dir=tmp_path, db_mode=mode, database_url=url, **extra)
+
+
+def _settings(tmp_path, monkeypatch, **fields):
+    _clean(monkeypatch)
+    return config.Settings(_env_file=None, data_dir=tmp_path, **fields)
+
+
+def _from_env_file(tmp_path, monkeypatch, text):
+    _clean(monkeypatch)
+    env = tmp_path / ".env"
+    env.write_text(text, encoding="utf-8")
+    return config.Settings(_env_file=env, data_dir=tmp_path)
+
+
+EXTERNAL = {"db_host": "db.example", "db_port": "5433", "db_name": "filetransfer", "db_user": "ft"}
 
 
 def test_default_is_sqlite_in_data_dir(tmp_path, monkeypatch):
-    monkeypatch.delenv("FT_DB_MODE", raising=False)
-    monkeypatch.delenv("FT_DATABASE_URL", raising=False)
-    cfg = config.Settings(_env_file=None, data_dir=tmp_path)
-    assert cfg.db_mode_normalized == "sqlite"
+    cfg = _settings(tmp_path, monkeypatch)
+    assert cfg.db_kind == "sqlite"
     assert cfg.is_sqlite and cfg.db_dialect == "sqlite"
     assert cfg.db_path == tmp_path / "app.db"
     assert cfg.db_url == f"sqlite+aiosqlite:///{(tmp_path / 'app.db').as_posix()}"
     assert cfg.sync_db_url == f"sqlite:///{(tmp_path / 'app.db').as_posix()}"
 
 
-@pytest.mark.parametrize("scheme", ["postgresql", "postgres", "postgresql+asyncpg", "postgresql+psycopg"])
-def test_external_postgresql_urls_use_bundled_drivers(tmp_path, monkeypatch, scheme):
-    cfg = _settings(tmp_path, monkeypatch, "external", f"{scheme}://ft:p%40ss%25w@db.example:5433/filetransfer")
+def test_external_postgresql_from_separate_fields(tmp_path, monkeypatch):
+    """密码照原样填写，特殊字符由应用转义。"""
+    cfg = _settings(tmp_path, monkeypatch, **EXTERNAL, db_password="p@ss%w:/#")
+    assert cfg.db_kind == "external"
     assert not cfg.is_sqlite and cfg.db_dialect == "postgresql"
     assert cfg.db_path is None
-    assert cfg.db_url == "postgresql+asyncpg://ft:p%40ss%25w@db.example:5433/filetransfer"
-    assert cfg.sync_db_url == "postgresql+psycopg://ft:p%40ss%25w@db.example:5433/filetransfer"
+    assert cfg.db_url == "postgresql+asyncpg://ft:p%40ss%25w%3A%2F%23@db.example:5433/filetransfer"
+    assert cfg.sync_db_url == "postgresql+psycopg://ft:p%40ss%25w%3A%2F%23@db.example:5433/filetransfer"
 
 
-def test_builtin_reads_generated_password(tmp_path, monkeypatch):
-    secret = tmp_path / "postgres-password"
-    secret.write_text("Abc123generated\n", encoding="utf-8")
-    cfg = _settings(tmp_path, monkeypatch, " Builtin ", builtin_db_password_file=secret)
-    assert not cfg.is_sqlite and cfg.db_path is None
+def test_env_file_in_release_format(tmp_path, monkeypatch):
+    """与完整版 .env 相同的写法：DB_BUILTIN 行带行尾注释，其余各占一行。"""
+    cfg = _from_env_file(tmp_path, monkeypatch, (
+        "DB_BUILTIN=false        # true：内置数据库（默认）；false：外置数据库，为空使用sqlite\n"
+        "DB_HOST=10.0.0.5\nDB_PORT=5432\nDB_NAME=ftdb\nDB_USER=ft\nDB_PASSWORD=\"a b#c\"\n"))
+    assert cfg.db_kind == "external"
+    url = make_url(cfg.sync_db_url)
+    assert (url.drivername, url.username, url.password, url.host, url.port, url.database) == (
+        "postgresql+psycopg", "ft", "a b#c", "10.0.0.5", 5432, "ftdb")
+
+
+@pytest.mark.parametrize("raw", ["true", "True", "1", "yes", "on"])
+def test_builtin_switch_reads_generated_password(tmp_path, monkeypatch, raw):
+    """完整版的 .env：DB_BUILTIN=true，密码由数据库容器写在 DB_PASSWORD，其余几项不用填。"""
+    cfg = _from_env_file(tmp_path, monkeypatch, (
+        f"DB_BUILTIN={raw}        # 注释\nDB_HOST=\nDB_PORT=5432\nDB_NAME=\nDB_USER=\n"
+        "DB_PASSWORD=Abc123generated\n"))
+    assert cfg.db_kind == "builtin" and not cfg.is_sqlite and cfg.db_path is None
     assert cfg.sync_db_url == "postgresql+psycopg://filetransfer:Abc123generated@db:5432/filetransfer"
     assert cfg.db_url == "postgresql+asyncpg://filetransfer:Abc123generated@db:5432/filetransfer"
 
 
-def test_builtin_without_password_file_explains_what_to_do(tmp_path, monkeypatch):
-    cfg = _settings(tmp_path, monkeypatch, "builtin", builtin_db_password_file=tmp_path / "missing")
-    with pytest.raises(ValueError, match="db 服务.*FT_DB_MODE"):
+@pytest.mark.parametrize("raw", ["false", "0", "no", "off"])
+def test_builtin_false_without_host_is_sqlite(tmp_path, monkeypatch, raw):
+    cfg = _from_env_file(tmp_path, monkeypatch, f"DB_BUILTIN={raw}\nDB_HOST=\nDB_PASSWORD=leftover\n")
+    assert cfg.db_kind == "sqlite"
+
+
+def test_builtin_without_password_explains_what_to_do(tmp_path, monkeypatch):
+    cfg = _settings(tmp_path, monkeypatch, builtin_db=True)
+    with pytest.raises(ValueError, match="DB_PASSWORD.*db 服务.*DB_BUILTIN 改为 false"):
         cfg.sync_db_url
 
 
-@pytest.mark.parametrize(("mode", "url", "message"), [
-    ("mysql", "", "FT_DB_MODE 只能是"),
-    ("sqlite", "postgresql://u:p@h/db", "FT_DB_MODE 改为 external"),
-    ("builtin", "postgresql://u:p@h/db", "FT_DB_MODE 改为 external"),
-    ("external", "", "必须设置 FT_DATABASE_URL"),
-    ("external", "mysql://u:p@h/db", "只支持 postgresql"),
-    ("external", "sqlite:///x.db", "只支持 postgresql"),
-    ("external", "not a url", "格式不正确"),
+@pytest.mark.parametrize("legacy", [{"db_mode": "builtin"}, {"database_url": "postgresql://u:p@h/db"}])
+def test_legacy_settings_are_rejected_with_instructions(tmp_path, monkeypatch, legacy):
+    """1.5.0 的 FT_DB_MODE / FT_DATABASE_URL 不再生效：照旧值猜测可能连错库，所以直接报错并说明怎么改。"""
+    cfg = _settings(tmp_path, monkeypatch, **legacy)
+    with pytest.raises(ValueError, match="已不再使用.*DB_BUILTIN"):
+        cfg.sync_db_url
+
+
+@pytest.mark.parametrize(("fields", "message"), [
+    ({"builtin_db": True, "db_password": "x", "db_host": "h"}, "DB_BUILTIN 改为 false"),
+    ({"db_host": "h", "db_user": "u"}, "必须填写 DB_NAME"),
+    ({"db_host": "h", "db_name": "n"}, "必须填写 DB_USER"),
+    ({**EXTERNAL, "db_port": "abc"}, "DB_PORT 必须是"),
+    ({**EXTERNAL, "db_port": "70000"}, "DB_PORT 必须是"),
 ])
-def test_invalid_database_settings_are_rejected(tmp_path, monkeypatch, mode, url, message):
-    cfg = _settings(tmp_path, monkeypatch, mode, url)
+def test_invalid_database_settings_are_rejected(tmp_path, monkeypatch, fields, message):
+    cfg = _settings(tmp_path, monkeypatch, **fields)
     with pytest.raises(ValueError, match=message):
         cfg.sync_db_url
 
 
+def test_empty_port_defaults_to_5432(tmp_path, monkeypatch):
+    cfg = _settings(tmp_path, monkeypatch, **{**EXTERNAL, "db_port": ""})
+    assert cfg.sync_db_url.endswith("@db.example:5432/filetransfer")
+
+
+def test_invalid_builtin_switch_is_rejected(tmp_path, monkeypatch):
+    _clean(monkeypatch)
+    monkeypatch.setenv("DB_BUILTIN", "maybe")
+    with pytest.raises(ValueError):
+        config.Settings(_env_file=None, data_dir=tmp_path)
+
+
 def test_postgresql_site_gets_random_secret(tmp_path, monkeypatch):
     monkeypatch.delenv("FT_SECRET_KEY", raising=False)
-    cfg = _settings(tmp_path, monkeypatch, "external", "postgresql://ft@localhost/filetransfer")
+    cfg = _settings(tmp_path, monkeypatch, **EXTERNAL)
     config._resolve_secret_key(cfg)
     assert cfg.secret_key != config.LEGACY_SECRET_KEY
 
@@ -89,7 +144,7 @@ def test_site_migrated_from_legacy_sqlite_keeps_legacy_secret(tmp_path, monkeypa
     """1.5.0 之前没配密钥的 SQLite 站点迁到 PostgreSQL 后，必须沿用旧密钥才能解开已有数据。"""
     monkeypatch.delenv("FT_SECRET_KEY", raising=False)
     (tmp_path / "app.db").write_bytes(b"")
-    cfg = _settings(tmp_path, monkeypatch, "external", "postgresql://ft@localhost/filetransfer")
+    cfg = _settings(tmp_path, monkeypatch, **EXTERNAL)
     config._resolve_secret_key(cfg)
     assert cfg.secret_key == config.LEGACY_SECRET_KEY
 
@@ -162,12 +217,57 @@ def test_app_starts_on_database_created_from_sqlite_init_script(tmp_path):
     connection.executescript((ROOT / "db" / "init-sqlite.sql").read_text(encoding="utf-8"))
     connection.close()
     result = _run(["-c", "from app.core.bootstrap import bootstrap; bootstrap()"],
-                  FT_DATA_DIR=str(tmp_path), FT_DB_MODE="sqlite", FT_DATABASE_URL="",
+                  FT_DATA_DIR=str(tmp_path), DB_BUILTIN="false", DB_HOST="",
                   FT_SECRET_KEY="init-script-test")
     assert result.returncode == 0, result.stderr
     connection = sqlite3.connect(tmp_path / "app.db")
     try:
-        assert connection.execute("SELECT username, is_admin FROM users").fetchall() == [("admin", 1)]
+        assert sorted(connection.execute("SELECT username, is_admin, is_system FROM users").fetchall()) == [
+            ("@anonymous", 0, 1), ("admin", 1, 0)]
         assert connection.execute("SELECT count(*) FROM settings").fetchone()[0] > 0
     finally:
         connection.close()
+
+
+@pytest.mark.skipif(config.settings.is_sqlite, reason="需要 PostgreSQL 测试库")
+def test_external_postgresql_initialised_from_init_script(tmp_path):
+    """外置数据库的用法：空库导入 init-postgresql.sql，应用直接启动，管理员 admin/admin 可用。"""
+    import uuid
+
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.pool import NullPool
+
+    from app.core.security import verify_password
+
+    base = make_url(config.settings.sync_db_url)
+    name = f"{base.database}_init_{uuid.uuid4().hex[:8]}"
+    admin = create_engine(base, isolation_level="AUTOCOMMIT", poolclass=NullPool)
+    with admin.connect() as connection:
+        connection.exec_driver_sql(f'CREATE DATABASE "{name}"')
+    target = create_engine(base.set(database=name), isolation_level="AUTOCOMMIT", poolclass=NullPool)
+    try:
+        with target.connect() as connection:
+            connection.exec_driver_sql((ROOT / "db" / "init-postgresql.sql").read_text(encoding="utf-8"))
+        result = _run(["-c", "from app.core.bootstrap import bootstrap; bootstrap()"],
+                      FT_DATA_DIR=str(tmp_path), FT_SECRET_KEY="init-script-test", DB_NAME=name)
+        assert result.returncode == 0, result.stderr
+        with target.connect() as connection:
+            users = connection.execute(text(
+                "SELECT username, password_hash, is_admin, must_change_password, created_at FROM users"
+                " WHERE NOT is_system")).all()
+            system = connection.execute(text("SELECT username FROM users WHERE is_system")).scalars().all()
+            keys = {key for (key,) in connection.execute(text("SELECT key FROM settings"))}
+            version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        [(username, password_hash, is_admin, must_change, created_at)] = users
+        assert (username, is_admin, must_change) == ("admin", True, True)
+        assert system == ["@anonymous"]  # 匿名上传的系统账号由迁移写入
+        assert verify_password("admin", password_hash) and created_at is not None
+        # 脚本没写的两项由应用启动时补上
+        assert {"site.name", "quota.max_upload_mb", "site.base_url", "offline.enabled"} <= keys
+        assert version == "b5e1d7c3a9f4"
+    finally:
+        target.dispose()
+        with admin.connect() as connection:
+            connection.exec_driver_sql(f'DROP DATABASE "{name}" WITH (FORCE)')
+        admin.dispose()

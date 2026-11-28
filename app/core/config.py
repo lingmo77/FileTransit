@@ -1,6 +1,7 @@
 """应用配置。
 
-所有配置项都可以通过环境变量覆盖，前缀为 ``FT_``，例如 ``FT_SECRET_KEY``。
+所有配置项都可以通过环境变量覆盖，前缀为 ``FT_``，例如 ``FT_SECRET_KEY``；
+数据库配置例外，统一用 ``DB_`` 开头（``DB_BUILTIN``、``DB_HOST`` 等）。
 也支持项目根目录下的 ``.env`` 文件（参考 ``.env.example``）。
 """
 
@@ -11,14 +12,13 @@ import secrets
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy.engine import URL, make_url
-from sqlalchemy.exc import ArgumentError
+from sqlalchemy.engine import URL
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-DB_MODES = ("sqlite", "builtin", "external")
-#: 内置 PostgreSQL 的账号名与库名（见 docker/postgres/Dockerfile）
+#: 内置 PostgreSQL 的账号名与库名（见 docker-compose.yml 的 db 服务）
 BUILTIN_DB_NAME = "filetransfer"
 
 
@@ -27,6 +27,8 @@ class Settings(BaseSettings):
         env_file=BASE_DIR / ".env",
         env_prefix="FT_",
         extra="ignore",
+        # 数据库配置用 DB_ 开头的别名读取；代码和测试里仍可用字段名传参
+        populate_by_name=True,
     )
 
     # ---- 基础 ----
@@ -103,65 +105,62 @@ class Settings(BaseSettings):
     initial_offline_enabled: bool = False
 
     # ---- 数据库 ----
-    #: ``sqlite``：数据目录下的 app.db（源码版默认）；
-    #: ``builtin``：完整版内置的 PostgreSQL 容器（完整版默认），密码由数据库容器自动生成；
-    #: ``external``：外置 PostgreSQL，连接串写在 ``database_url``。
-    db_mode: str = "sqlite"
-    #: 只用于 external：``postgresql://用户:密码@主机:5432/库名``，密码里的特殊字符需要 URL 编码
-    database_url: str = ""
-    #: 内置 PostgreSQL 的连接参数，与 docker-compose.yml 的 db 服务、docker/postgres/ 镜像保持一致
+    #: true：完整版内置的 PostgreSQL 容器（完整版默认），只用 DB_PASSWORD，
+    #:   密码由数据库容器首次启动时生成并写进 .env；
+    #: false：填了 DB_HOST 就连外置 PostgreSQL，没填就用数据目录下的 SQLite（源码版默认）。
+    builtin_db: bool = Field(False, validation_alias="DB_BUILTIN")
+    db_host: str = Field("", validation_alias="DB_HOST")
+    db_port: str = Field("5432", validation_alias="DB_PORT")
+    db_name: str = Field("", validation_alias="DB_NAME")
+    db_user: str = Field("", validation_alias="DB_USER")
+    db_password: str = Field("", validation_alias="DB_PASSWORD")
+    #: 内置 PostgreSQL 的主机名，与 docker-compose.yml 的 db 服务一致
     builtin_db_host: str = "db"
-    builtin_db_password_file: Path = Path("/run/ft-secrets/postgres-password")
+    #: 旧版的数据库配置（1.5.0 的 FT_DB_MODE、FT_DATABASE_URL）；仍然设置时启动报错，提示改配置
+    db_mode: str = ""
+    database_url: str = ""
 
     @property
-    def db_mode_normalized(self) -> str:
-        mode = self.db_mode.strip().lower()
-        if mode not in DB_MODES:
-            raise ValueError(f"FT_DB_MODE 只能是 {'、'.join(DB_MODES)}，当前为 {self.db_mode!r}")
-        return mode
+    def db_kind(self) -> str:
+        """``sqlite``、``builtin`` 或 ``external``。"""
+        if self.db_mode.strip() or self.database_url.strip():
+            raise ValueError("FT_DB_MODE、FT_DATABASE_URL 已不再使用，请改用 DB_BUILTIN 和 DB_HOST、DB_PORT、"
+                             "DB_NAME、DB_USER、DB_PASSWORD（见 .env.example），改好后删除这两行")
+        if self.builtin_db:
+            if self.db_host.strip():
+                raise ValueError("DB_BUILTIN=true 时不使用 DB_HOST；要连接外置 PostgreSQL，请把 DB_BUILTIN 改为 false")
+            return "builtin"
+        return "external" if self.db_host.strip() else "sqlite"
 
     def _database_url(self) -> URL:
-        mode = self.db_mode_normalized
-        raw = self.database_url.strip()
-        if mode == "sqlite":
-            if raw:
-                raise ValueError("FT_DB_MODE=sqlite 时不使用 FT_DATABASE_URL；"
-                                 "要连接外置 PostgreSQL，请把 FT_DB_MODE 改为 external")
+        kind = self.db_kind
+        if kind == "sqlite":
             return URL.create("sqlite", database=(self.data_dir / "app.db").as_posix())
-        # 驱动由应用决定：同步（迁移、启动初始化）用 psycopg 3，异步（运行时）用 asyncpg
-        if mode == "builtin":
-            if raw:
-                raise ValueError("FT_DB_MODE=builtin 时不使用 FT_DATABASE_URL；"
-                                 "要连接外置 PostgreSQL，请把 FT_DB_MODE 改为 external")
-            return URL.create("postgresql+psycopg", username=BUILTIN_DB_NAME,
-                              password=self._builtin_password(), host=self.builtin_db_host,
-                              port=5432, database=BUILTIN_DB_NAME)
-        if not raw:
-            raise ValueError("FT_DB_MODE=external 时必须设置 FT_DATABASE_URL")
-        try:
-            url = make_url(raw)
-        except ArgumentError as exc:
-            raise ValueError("FT_DATABASE_URL 格式不正确") from exc
-        if url.get_backend_name() not in ("postgresql", "postgres"):
-            raise ValueError("FT_DATABASE_URL 只支持 postgresql://")
-        return url.set(drivername="postgresql+psycopg")
-
-    def _builtin_password(self) -> str:
-        path = self.builtin_db_password_file
-        try:
-            password = path.read_text(encoding="utf-8").strip()
-        except OSError as exc:
-            raise ValueError(
-                f"读不到内置数据库的密码文件 {path}：请确认 docker-compose.yml 里的 db 服务已启动；"
-                "不使用内置数据库时把 FT_DB_MODE 改为 sqlite 或 external") from exc
-        if not password:
-            raise ValueError(f"内置数据库的密码文件 {path} 为空")
-        return password
+        # 驱动由应用决定：同步（迁移、启动初始化）用 psycopg 3，异步（运行时）用 asyncpg。
+        # URL.create 会自动转义密码里的特殊字符，.env 里照原样填写即可。
+        if kind == "builtin":
+            password = self.db_password.strip()
+            if not password:
+                raise ValueError(
+                    "没有读到内置数据库密码 DB_PASSWORD：它由 docker-compose.yml 里的 db 服务"
+                    "首次启动时写进 .env，请确认 db 服务已启动；不使用内置数据库时把 DB_BUILTIN 改为 false")
+            return URL.create("postgresql+psycopg", username=BUILTIN_DB_NAME, password=password,
+                              host=self.builtin_db_host, port=5432, database=BUILTIN_DB_NAME)
+        missing = [name for name, value in (("DB_NAME", self.db_name), ("DB_USER", self.db_user))
+                   if not value.strip()]
+        if missing:
+            raise ValueError(f"使用外置 PostgreSQL 时必须填写 {'、'.join(missing)}")
+        port = self.db_port.strip() or "5432"
+        if not port.isdigit() or not 0 < int(port) < 65536:
+            raise ValueError(f"DB_PORT 必须是 1-65535 的端口号，当前为 {self.db_port!r}")
+        return URL.create("postgresql+psycopg", username=self.db_user.strip(),
+                          password=self.db_password or None, host=self.db_host.strip(),
+                          port=int(port), database=self.db_name.strip())
 
     @property
     def db_dialect(self) -> str:
         """``sqlite`` 或 ``postgresql``。"""
-        return "sqlite" if self.db_mode_normalized == "sqlite" else "postgresql"
+        return "sqlite" if self.db_kind == "sqlite" else "postgresql"
 
     @property
     def is_sqlite(self) -> bool:

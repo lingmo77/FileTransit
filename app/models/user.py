@@ -28,6 +28,8 @@ class User(Base):
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     #: 是否允许上传永久保存（长期有效）的文件；管理员不需要这个开关，天然允许
     can_permanent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    #: 系统账号（目前只有承载匿名上传文件的 ``@anonymous``）：不能登录，不出现在用户管理里
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     #: NULL 表示使用站点默认配额
     quota_max_files: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -47,7 +49,7 @@ class User(Base):
 
     @property
     def display_name(self) -> str:
-        return self.username
+        return "匿名用户" if self.is_system else self.username
 
     @property
     def can_save_forever(self) -> bool:
